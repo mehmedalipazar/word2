@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SerbestSayfa</title>
+<link rel="stylesheet" href="css/app.css">
+<style id="pageStyle"></style>
+</head>
+<body>
+
+<header class="appbar chrome">
+  <div class="brand"><span class="brand-mark"></span>SerbestSayfa</div>
+  <input id="docTitle" class="doc-title" value="Adsız belge" spellcheck="false" title="Belge adı">
+  <div class="appbar-actions">
+    <button class="btn" data-cmd="new" data-icon="file" title="Yeni belge">Yeni</button>
+    <button class="btn" data-cmd="open" data-icon="open" title="Aç: SerbestSayfa (.sayfa) ya da Word (.docx) belgesi (Ctrl+O)">Aç</button>
+    <button class="btn" data-cmd="save" data-icon="save" title="Kaydet (Ctrl+S)">Kaydet</button>
+    <span class="sep"></span>
+    <button class="btn" data-cmd="docx" data-icon="download" title="Word (.docx) olarak dışa aktar">Word'e aktar</button>
+    <button class="btn primary" data-cmd="print" data-icon="printer" title="Yazdır / PDF olarak kaydet (Ctrl+P)">PDF / Yazdır</button>
+  </div>
+</header>
+
+<div class="toolbars chrome">
+<div class="toolbar" id="toolbar">
+  <div class="group">
+    <button class="tb" data-cmd="undo" data-icon="undo" title="Geri al (Ctrl+Z)"></button>
+    <button class="tb" data-cmd="redo" data-icon="redo" title="Yinele (Ctrl+Y)"></button>
+  </div>
+  <div class="group">
+    <select id="blockStyle" title="Paragraf stili">
+      <option value="p">Normal</option>
+      <option value="h1">Başlık 1</option>
+      <option value="h2">Başlık 2</option>
+      <option value="h3">Başlık 3</option>
+    </select>
+    <select id="fontFamily" title="Yazı tipi">
+      <option>Calibri</option><option>Arial</option><option>Times New Roman</option>
+      <option>Cambria</option><option>Georgia</option><option>Segoe UI</option>
+      <option>Tahoma</option><option>Verdana</option><option>Courier New</option>
+    </select>
+    <select id="fontSize" title="Yazı boyutu (pt)">
+      <option>8</option><option>9</option><option>10</option><option>10.5</option><option selected>11</option>
+      <option>12</option><option>14</option><option>16</option><option>18</option><option>20</option>
+      <option>24</option><option>28</option><option>32</option><option>36</option><option>48</option><option>72</option>
+    </select>
+  </div>
+  <div class="group">
+    <button class="tb" data-cmd="bold" data-icon="bold" title="Kalın (Ctrl+B)"></button>
+    <button class="tb" data-cmd="italic" data-icon="italic" title="İtalik (Ctrl+I)"></button>
+    <button class="tb" data-cmd="underline" data-icon="underline" title="Altı çizili (Ctrl+U)"></button>
+    <button class="tb" data-cmd="strikeThrough" data-icon="strike" title="Üstü çizili"></button>
+    <label class="tb color-tb" title="Yazı rengi"><span class="letter">A</span><span class="bar" id="foreBar"></span><input type="color" id="foreColor" value="#c00000"></label>
+    <label class="tb color-tb" title="Vurgu rengi"><span data-icon="highlight"></span><span class="bar" id="backBar"></span><input type="color" id="backColor" value="#ffff00"></label>
+    <button class="tb" data-cmd="removeFormat" data-icon="eraser" title="Biçimi temizle"></button>
+  </div>
+  <div class="group">
+    <button class="tb" data-cmd="justifyLeft" data-icon="alignLeft" title="Sola hizala"></button>
+    <button class="tb" data-cmd="justifyCenter" data-icon="alignCenter" title="Ortala"></button>
+    <button class="tb" data-cmd="justifyRight" data-icon="alignRight" title="Sağa hizala"></button>
+    <button class="tb" data-cmd="justifyFull" data-icon="alignJustify" title="İki yana yasla"></button>
+    <select id="lineHeight" title="Satır aralığı">
+      <option value="1">1,0</option><option value="1.15">1,15</option><option value="1.35" selected>1,35</option>
+      <option value="1.5">1,5</option><option value="2">2,0</option>
+    </select>
+  </div>
+  <div class="group">
+    <button class="tb" data-cmd="insertUnorderedList" data-icon="list" title="Madde işaretleri"></button>
+    <button class="tb" data-cmd="insertOrderedList" data-icon="listOrdered" title="Numaralandırma"></button>
+    <button class="tb" data-cmd="outdent" data-icon="outdent" title="Girintiyi azalt"></button>
+    <button class="tb" data-cmd="indent" data-icon="indent" title="Girintiyi artır"></button>
+  </div>
+  <div class="group">
+    <button class="btn" data-cmd="insertImage" data-icon="image" title="Resim ekle (ya da dosyayı sayfaya sürükleyin / yapıştırın)">Resim</button>
+    <button class="tb" data-cmd="pageBreak" data-icon="pageBreak" title="Sayfa sonu (Ctrl+Enter)"></button>
+    <button class="tb" data-cmd="addPage" data-icon="filePlus" title="Sona boş sayfa ekle"></button>
+    <button class="tb" data-cmd="removePage" data-icon="fileMinus" title="Sondaki boş sayfayı kaldır"></button>
+    <button class="tb" data-cmd="pageSetup" data-icon="pageSetup" title="Sayfa yapısı"></button>
+  </div>
+</div>
+
+<div class="ctxbar" id="ctxbar">
+  <div class="group">
+    <button class="tb" data-cmd="undo" data-icon="undo" title="Geri al (Ctrl+Z)"></button>
+    <button class="tb" data-cmd="redo" data-icon="redo" title="Yinele (Ctrl+Y)"></button>
+  </div>
+  <span class="ctx-label">Resim</span>
+  <div class="group seg" id="wrapSeg" title="Metin kaydırma">
+    <button class="tb" data-wrap="square" data-icon="wrapSquare" title="Kare: metin yanından akar">Kare</button>
+    <button class="tb" data-wrap="topbottom" data-icon="wrapTopBottom" title="Üst ve alt: metin üstünden ve altından akar">Üst-Alt</button>
+    <button class="tb" data-wrap="front" data-icon="wrapFront" title="Metnin önünde">Önde</button>
+    <button class="tb" data-wrap="behind" data-icon="wrapBehind" title="Metnin arkasında">Arkada</button>
+  </div>
+  <div class="group">
+    <button class="tb" data-align="left" data-icon="objLeft" title="Sola hizala (kenar boşluğuna)"></button>
+    <button class="tb" data-align="center" data-icon="objCenter" title="Yatay ortala"></button>
+    <button class="tb" data-align="right" data-icon="objRight" title="Sağa hizala"></button>
+    <button class="tb" data-align="top" data-icon="objTop" title="Üste hizala"></button>
+    <button class="tb" data-align="middle" data-icon="objMiddle" title="Dikey ortala"></button>
+    <button class="tb" data-align="bottom" data-icon="objBottom" title="Alta hizala"></button>
+    <button class="tb" data-align="distH" data-icon="distH" title="Yatay dağıt (3+ resim)"></button>
+    <button class="tb" data-align="distV" data-icon="distV" title="Dikey dağıt (3+ resim)"></button>
+  </div>
+  <div class="group">
+    <button class="tb" data-cmd="toggleCaption" data-icon="caption" title="Şekil yazısı ekle/kaldır (Enter ya da çift tık: yazıyı düzenle)">Şekil yazısı</button>
+    <select id="capLabel" title="Etiket (numaralar her etiket için ayrı sayılır)">
+      <option>Şekil</option><option>Harita</option><option>Fotoğraf</option><option>Grafik</option><option>Resim</option><option>Tablo</option>
+    </select>
+    <button class="tb" data-cmd="captionPos" data-icon="capPos" title="Yazıyı resmin üstüne/altına al"></button>
+  </div>
+  <div class="group">
+    <button class="tb" data-cmd="fitWidth" data-icon="fitWidth" title="Kenar boşlukları arasına sığdır"></button>
+    <button class="tb" data-cmd="bringFront" data-icon="front" title="Öne getir"></button>
+    <button class="tb" data-cmd="sendBack" data-icon="back" title="Arkaya gönder"></button>
+    <button class="tb" data-cmd="toggleLock" data-icon="lock" title="Konumu kilitle / aç"></button>
+    <button class="tb" data-cmd="duplicate" data-icon="copy" title="Çoğalt (Ctrl+D)"></button>
+    <button class="tb danger" data-cmd="deleteImage" data-icon="trash" title="Sil (Delete)"></button>
+  </div>
+  <div class="group nums" id="numFields">
+    <label>X<input type="number" step="0.1" data-num="x"></label>
+    <label>Y<input type="number" step="0.1" data-num="y"></label>
+    <label>G<input type="number" step="0.1" min="0.3" data-num="w" title="Genişlik (cm)"></label>
+    <label>Y<input type="number" step="0.1" min="0.3" data-num="h" title="Yükseklik (cm)"></label>
+    <label class="chk" title="En-boy oranını koru"><input type="checkbox" id="keepRatio" checked>oran</label>
+    <label>°<input type="number" step="1" data-num="rot" title="Döndürme açısı"></label>
+    <span class="unit">cm</span>
+  </div>
+</div>
+</div>
+
+<main class="workspace" id="workspace">
+  <div class="scaler" id="scaler">
+    <div class="doc" id="doc">
+      <div class="layer pages" id="pagesLayer"></div>
+      <div class="layer behind" id="behindLayer"></div>
+      <div class="flow" id="flow">
+        <div class="editor" id="editor" contenteditable="true" spellcheck="true" lang="tr"><p><br></p></div>
+      </div>
+      <div class="layer front" id="frontLayer"></div>
+      <div class="layer overlay" id="overlay"></div>
+    </div>
+  </div>
+</main>
+
+<footer class="statusbar chrome">
+  <span id="stPage">Sayfa 1 / 1</span>
+  <span id="stWords">0 kelime</span>
+  <span id="stHint" class="hint"></span>
+  <span class="spacer"></span>
+  <label class="st-toggle" title="Diğer nesnelere, kenar boşluklarına ve sayfa ortasına yapış (sürüklerken Alt ile geçici kapatılır)"><input type="checkbox" id="optSnap" checked><span data-icon="magnet"></span>Kılavuzlar</label>
+  <label class="st-toggle" title="0,5 cm ızgaraya yapış"><input type="checkbox" id="optGrid"><span data-icon="grid"></span>Izgara</label>
+  <span class="zoom">
+    <button class="tb small" data-cmd="zoomOut" data-icon="zoomOut" title="Uzaklaştır"></button>
+    <button class="zoom-val" data-cmd="zoomReset" id="zoomVal" title="%100'e dön">100%</button>
+    <button class="tb small" data-cmd="zoomIn" data-icon="zoomIn" title="Yakınlaştır"></button>
+  </span>
+</footer>
+
+<dialog id="pageDialog" class="dialog">
+  <form method="dialog">
+    <h2>Sayfa yapısı</h2>
+    <div class="row">
+      <label>Kağıt
+        <select name="size"><option value="A4">A4 (21 × 29,7 cm)</option><option value="A5">A5 (14,8 × 21 cm)</option><option value="A3">A3 (29,7 × 42 cm)</option><option value="Letter">Letter (21,6 × 27,9 cm)</option></select>
+      </label>
+      <label>Yön
+        <select name="orient"><option value="portrait">Dikey</option><option value="landscape">Yatay</option></select>
+      </label>
+    </div>
+    <fieldset>
+      <legend>Kenar boşlukları (cm)</legend>
+      <label>Üst<input name="mt" type="number" step="0.1" min="0"></label>
+      <label>Alt<input name="mb" type="number" step="0.1" min="0"></label>
+      <label>Sol<input name="ml" type="number" step="0.1" min="0"></label>
+      <label>Sağ<input name="mr" type="number" step="0.1" min="0"></label>
+    </fieldset>
+    <label class="chk"><input name="pageNumbers" type="checkbox"> Sayfa numarası (alt orta)</label>
+    <div class="actions">
+      <button value="cancel" class="btn">Vazgeç</button>
+      <button value="ok" class="btn primary">Uygula</button>
+    </div>
+  </form>
+</dialog>
+
+<input type="file" id="fileImage" accept="image/*" multiple hidden>
+<input type="file" id="fileOpen" accept=".sayfa,.json,.docx" hidden>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="js/util.js"></script>
+<script src="js/zip.js"></script>
+<script src="js/core.js"></script>
+<script src="js/text.js"></script>
+<script src="js/objects.js"></script>
+<script src="js/docx.js"></script>
+<script src="js/docximport.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
