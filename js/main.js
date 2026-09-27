@@ -34,12 +34,16 @@
     toggleCaption: () => app.toggleCaption(),
     captionPos: () => app.toggleCaptionPos(),
     pageBreak: () => app.insertPageBreak(),
+    find: () => app.openFind(true),
+    paragraph: () => app.paragraphDialog(),
     zoomIn: () => zoomStep(1),
     zoomOut: () => zoomStep(-1),
     zoomReset: () => setZoom(1),
   };
   for (const c of ['bold', 'italic', 'underline', 'strikeThrough', 'removeFormat', 'justifyLeft', 'justifyCenter',
     'justifyRight', 'justifyFull', 'insertUnorderedList', 'insertOrderedList']) commands[c] = () => app.exec(c);
+  commands.subscript = () => app.setScript('subscript');
+  commands.superscript = () => app.setScript('superscript');
 
   // Düğmeler odağı çalmasın: metindeki seçim korunur
   document.addEventListener('mousedown', (e) => {
@@ -69,12 +73,48 @@
   });
 
   // ---------- Klavye kısayolları ----------
+  // Word'ün metin kısayolları. Tarayıcının aynı tuşlara bağlı işleri (Ctrl+R yenile, Ctrl+E/L adres çubuğu,
+  // Ctrl+J indirilenler, Ctrl+H geçmiş, Ctrl+K arama) her durumda engellenir. İş, imleç metindeyken ya da
+  // hiçbir alan odakta değilken yapılır; resim seçiliyken Ctrl+L/E/R resmi kenar boşluklarına göre hizalar.
+  const TEXT_KEYS = {
+    b: () => app.exec('bold'),
+    i: () => app.exec('italic'),
+    u: () => app.exec('underline'),
+    e: () => app.exec('justifyCenter'),
+    l: () => app.exec('justifyLeft'),
+    r: () => app.exec('justifyRight'),
+    j: () => app.exec('justifyFull'),
+    ' ': () => app.exec('removeFormat'),
+    m: () => app.indent(1),
+    1: () => app.setLineHeight(1),
+    2: () => app.setLineHeight(2),
+    5: () => app.setLineHeight(1.5),
+    '=': () => app.setScript('subscript'),
+    '+': () => app.setScript('superscript'),
+    '>': () => app.growFont(1),
+    '<': () => app.growFont(-1),
+    ']': () => app.growFont(1, true),
+    '[': () => app.growFont(-1, true),
+    k: () => SS.toast('Köprü (bağlantı) eklemek henüz desteklenmiyor.'),
+  };
+  const SHIFT_KEYS = { l: () => app.exec('insertUnorderedList'), m: () => app.indent(-1), '=': TEXT_KEYS['='], '+': TEXT_KEYS['+'], '>': TEXT_KEYS['>'], '<': TEXT_KEYS['<'] };
+  const IMAGE_ALIGN = { l: 'left', e: 'center', r: 'right' };
+
   document.addEventListener('keydown', (e) => {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.getModifierState && e.getModifierState('AltGraph')) return; // AltGr ile yazılan karakterler (@, #, [ …)
     const k = e.key.toLowerCase();
     const a = document.activeElement || {};
     // Form alanları ve şekil yazısı düzenlenirken kendi geri alma/yineleme işlemleri çalışsın
     const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) || (a.isContentEditable && a !== els.editor);
+    if (e.altKey) {
+      // Ctrl+Alt+1/2/3: Başlık 1/2/3 (tuş başka bir karakter üretiyorsa dokunma)
+      if (/^[123]$/.test(e.key) && !inField) {
+        e.preventDefault();
+        app.setBlock('h' + e.key);
+      }
+      return;
+    }
     if (k === 's') {
       e.preventDefault();
       saveDoc(e.shiftKey);
@@ -84,6 +124,21 @@
     } else if (k === 'p') {
       e.preventDefault();
       printDoc();
+    } else if (k === 'f' || k === 'h') {
+      e.preventDefault();
+      app.openFind && app.openFind(k === 'h');
+    } else if (e.code === 'NumpadAdd' || e.code === 'NumpadSubtract' || k === '-' || k === '0') {
+      e.preventDefault();
+      if (k === '0') setZoom(1);
+      else zoomStep(e.code === 'NumpadAdd' ? 1 : -1);
+    } else if ((e.shiftKey ? SHIFT_KEYS : TEXT_KEYS)[k]) {
+      e.preventDefault();
+      if (inField) return;
+      if (app.objectsFocused()) {
+        if (IMAGE_ALIGN[k] && !e.shiftKey) app.alignSelected(IMAGE_ALIGN[k]);
+        return;
+      }
+      (e.shiftKey ? SHIFT_KEYS : TEXT_KEYS)[k]();
     } else if (inField) {
       /* alanların kendi geri alması çalışsın */
     } else if (k === 'z' && !e.shiftKey) {
@@ -92,15 +147,6 @@
     } else if (k === 'y' || (k === 'z' && e.shiftKey)) {
       e.preventDefault();
       app.redo();
-    } else if (k === '=' || k === '+') {
-      e.preventDefault();
-      zoomStep(1);
-    } else if (k === '-') {
-      e.preventDefault();
-      zoomStep(-1);
-    } else if (k === '0') {
-      e.preventDefault();
-      setZoom(1);
     }
   });
 
@@ -114,6 +160,7 @@
     app.renderOverlay();
     ws.scrollTop = els.scaler.offsetTop + mid * z - ws.clientHeight / 2;
     $('zoomVal').textContent = Math.round(z * 100) + '%';
+    app.updateRuler();
   }
   function zoomStep(dir) {
     const z = state.zoom;
@@ -167,10 +214,21 @@
     f.elements.mb.value = SS.round(U.pxToCm(m.b), 2);
     f.elements.ml.value = SS.round(U.pxToCm(m.l), 2);
     f.elements.mr.value = SS.round(U.pxToCm(m.r), 2);
-    f.elements.pageNumbers.checked = state.pageNumbers;
+    for (let i = 0; i < 3; i++) {
+      f.elements['h' + i].value = state.hf.header[i];
+      f.elements['f' + i].value = state.hf.footer[i];
+    }
+    f.elements.firstPage.checked = state.hf.firstPage;
+    f.elements.pnPreset.value = '';
     dlg.returnValue = '';
     dlg.showModal();
   }
+  // Hazır sayfa numarası seçeneği ilgili yuvaya yazılır
+  dlg.querySelector('[name="pnPreset"]').addEventListener('change', (e) => {
+    const [slot, text] = e.target.value.split('|');
+    if (slot) dlg.querySelector('form').elements[slot].value = text;
+    e.target.value = '';
+  });
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'ok') return;
     const f = dlg.querySelector('form').elements;
@@ -189,10 +247,15 @@
       state.page = prev;
       return SS.toast('Kenar boşlukları kağıt için çok büyük.');
     }
-    state.pageNumbers = f.pageNumbers.checked;
+    state.hf = {
+      header: [0, 1, 2].map((i) => f['h' + i].value),
+      footer: [0, 1, 2].map((i) => f['f' + i].value),
+      firstPage: f.firstPage.checked,
+    };
     state.images.forEach(app.clampToPage);
     updatePageStyle();
     app.relayoutAll();
+    app.markDirty(); // sayfa boyutu/kenar boşluğu değişti: tüm sayfa sonları yeniden
     app.commit('edit');
   });
 
@@ -203,6 +266,7 @@
   let savedGap = 24;
   function beforePrint() {
     if (printing) return;
+    app.paginateNow(); // sayfa sonları (dul/öksüz satır) kesinleşsin
     printing = true;
     savedZoom = state.zoom;
     savedGap = state.gap;
@@ -258,6 +322,7 @@
   app.onLayout = () => {
     updateStatus();
     updatePageStyle(); // geri alma sayfa yapısını da değiştirebilir
+    app.updateRuler();
   };
   let dirty = false; // son kayıt/açmadan beri değişiklik var mı
   app.onChange = () => {
@@ -296,17 +361,157 @@
   };
 
   // ---------- Otomatik kayıt (tarayıcı içinde, IndexedDB) ----------
+  // Her sekmenin kendi kurtarma kaydı var ('autosave:<sekme>'). Sekme kimliği sessionStorage'da durur:
+  // sayfa yenilenince aynı kayıt geri gelir. Açık sekmeler Web Locks ile kilit tutar; yeni açılan sekme
+  // yalnızca sahibi kapanmış ("sahipsiz") kayıtları devralır, başka bir sekmenin belgesini almaz.
+  // IndexedDB yazımı zaman uyumsuzdur ve sayfa kapanırken yetişmeyebilir: kapanırken ya da gizlenirken
+  // bekleyen değişiklikler localStorage'a eşzamanlı "acil kayıt" olarak da yazılır; açılışta yenisi seçilir.
+  const AS = 'autosave:';
+  const EMG = 'serbestsayfa-acil:';
+  const LOCK = 'serbestsayfa-sekme:';
+  const TAB = 'serbestsayfa-sekme';
+  const recKey = (id) => (id ? AS + id : 'autosave'); // '' = eski sürümün tek kaydı
+  const ls = (fn) => {
+    try {
+      return fn();
+    } catch (_) {
+      return null;
+    }
+  };
+  let tabId = null;
   let saveTimer = 0;
+  let changeSeq = 0; // her değişiklikte artar
+  let savedSeq = 0; // IndexedDB'ye yazılmış son değişiklik
+  const persisted = new Set(); // IndexedDB kaydında zaten bulunan resim varlıkları
+
   function autosaveNow() {
     clearTimeout(saveTimer);
-    return SS.idb.set('autosave', app.serialize()).catch(() => {});
+    if (!tabId) return Promise.resolve();
+    const seq = changeSeq;
+    const data = app.serialize();
+    const write = hasContent() ? SS.idb.set(recKey(tabId), data) : SS.idb.del(recKey(tabId));
+    return write
+      .then(() => {
+        savedSeq = Math.max(savedSeq, seq);
+        Object.keys(data.assets).forEach((a) => persisted.add(a));
+        const e = ls(() => JSON.parse(localStorage.getItem(EMG + tabId)));
+        if (!e || (e.savedAt || '') <= data.savedAt) ls(() => localStorage.removeItem(EMG + tabId));
+      })
+      .catch(() => {});
   }
   function scheduleAutosave() {
+    changeSeq++;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(autosaveNow, 1200);
   }
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && autosaveNow());
-  window.addEventListener('pagehide', autosaveNow);
+  // Eşzamanlı: yalnızca IndexedDB'de henüz olmayan resimler yazılır (sığmazsa resimsiz)
+  function emergencySave() {
+    if (!tabId || savedSeq === changeSeq) return;
+    const data = app.serialize();
+    const fresh = {};
+    for (const [id, a] of Object.entries(data.assets)) if (!persisted.has(id)) fresh[id] = a;
+    for (const assets of [fresh, {}]) if (ls(() => (localStorage.setItem(EMG + tabId, JSON.stringify({ ...data, assets })), true))) return;
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') return;
+    emergencySave();
+    autosaveNow();
+  });
+  window.addEventListener('pagehide', () => {
+    emergencySave();
+    autosaveNow();
+  });
+  // Kaydedilmemiş değişiklik varken kapatma/yenileme: tarayıcının "Sayfadan ayrılınsın mı?" sorusu
+  window.addEventListener('beforeunload', (e) => {
+    emergencySave();
+    if (dirty && hasContent()) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
+  // Sekme kilidi: sekme açık kaldıkça tutulur. Yenilemede eski sayfanın kilidi bir an sürebilir: kısa bekle;
+  // alınamazsa kimlik başka bir açık sekmede (çoğaltılmış sekme) kullanılıyor demektir.
+  function holdLock(id) {
+    if (!navigator.locks) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 1500);
+      navigator.locks
+        .request(LOCK + id, { signal: ac.signal }, () => {
+          clearTimeout(t);
+          resolve(true);
+          return new Promise(() => {});
+        })
+        .catch(() => resolve(false));
+    });
+  }
+
+  // Kayıt = IndexedDB kaydı ile acil kayıttan yenisi (acil kayıttaki eksik resimler IndexedDB'den tamamlanır)
+  async function readRecord(id) {
+    const rec = await SS.idb.get(recKey(id)).catch(() => null);
+    const emg = id ? ls(() => JSON.parse(localStorage.getItem(EMG + id))) : null;
+    if (emg && emg.app === 'SerbestSayfa' && (!rec || (emg.savedAt || '') > (rec.savedAt || '')))
+      return { data: { ...emg, assets: { ...(rec && rec.assets), ...emg.assets } }, stored: rec ? Object.keys(rec.assets || {}) : [] };
+    return rec ? { data: rec, stored: Object.keys(rec.assets || {}) } : null;
+  }
+  const dropRecord = (id) => {
+    ls(() => localStorage.removeItem(EMG + id));
+    return SS.idb.del(recKey(id)).catch(() => {});
+  };
+
+  // Sahibi kapanmış kayıtlar (Web Locks yoksa: bu sekmeninki dışındaki tüm kayıtlar)
+  async function orphanIds() {
+    const ids = new Set();
+    for (const k of (await SS.idb.keys().catch(() => [])) || [])
+      if (k === 'autosave') ids.add('');
+      else if (typeof k === 'string' && k.startsWith(AS)) ids.add(k.slice(AS.length));
+    ls(() => Object.keys(localStorage).forEach((k) => k.startsWith(EMG) && ids.add(k.slice(EMG.length))));
+    ids.delete(tabId);
+    if (!navigator.locks) return [...ids];
+    const held = new Set(((await navigator.locks.query()).held || []).map((l) => l.name));
+    return [...ids].filter((id) => !held.has(LOCK + id));
+  }
+
+  const hasText = (data) =>
+    data && data.app === 'SerbestSayfa' && ((data.html || '').replace(/<[^>]+>/g, '').trim() || (data.images && data.images.length));
+
+  // Açılış: yenilenen sekme kendi kaydını, yeni sekme en yeni sahipsiz kaydı, çoğaltılmış sekme kaynağın kopyasını açar
+  async function recoverWork() {
+    let id = ls(() => sessionStorage.getItem(TAB));
+    let from = null;
+    let adopt = false;
+    if (id && (await holdLock(id))) from = id;
+    else {
+      if (id) from = id; // çoğaltılmış sekme: kaynağın kaydını kopyala, kendine yeni kimlik al
+      id = SS.uid('s');
+      await holdLock(id);
+    }
+    tabId = id;
+    ls(() => sessionStorage.setItem(TAB, id));
+    let others = [];
+    if (from === null) {
+      others = await orphanIds();
+      let best = null;
+      for (const o of others) {
+        const r = await readRecord(o);
+        if (r && hasText(r.data) && (!best || (r.data.savedAt || '') > (best.r.data.savedAt || ''))) best = { o, r };
+      }
+      if (!best) return;
+      others = others.filter((o) => o !== best.o);
+      from = best.o;
+      adopt = true;
+    }
+    const rec = await readRecord(from);
+    if (!rec || !hasText(rec.data)) return;
+    app.load(rec.data); // geri yüklenen çalışma bir dosyaya kaydedilmemiş olabilir: "değişmiş" sayılır
+    if (from === tabId) rec.stored.forEach((a) => persisted.add(a));
+    changeSeq++;
+    await autosaveNow(); // devralınan/kopyalanan kayıt artık bu sekmenin
+    if (adopt) await dropRecord(from);
+    const more = (await Promise.all(others.map(readRecord))).filter((r) => r && hasText(r.data)).length;
+    SS.toast('Son çalışmanız geri yüklendi.' + (more ? ` Kurtarılabilecek ${more} belge daha var; yeni bir sekmede açılır.` : ''), more ? 6000 : 2800);
+  }
 
   // ---------- Dosya: yeni / aç / kaydet / Word'e aktar ----------
   let fileHandle = null;
@@ -397,6 +602,7 @@
       app.clearSelection();
       const blob = await SS.exportDocx(app);
       SS.downloadBlob(blob, SS.safeFileName(state.fileName) + '.docx');
+      dirty = false; // çalışma bir dosyada: kapatırken sorulmasın
       SS.toast('Word dosyası hazır (İndirilenler klasörü).');
     } catch (err) {
       console.error(err);
@@ -417,12 +623,7 @@
     if (fit < 1) setZoom(Math.max(0.5, Math.floor(fit * 20) / 20));
     dirty = false;
     try {
-      const data = await SS.idb.get('autosave');
-      const text = data && data.html ? data.html.replace(/<[^>]+>/g, '').trim() : '';
-      if (data && data.app === 'SerbestSayfa' && (text || (data.images && data.images.length))) {
-        app.load(data); // geri yüklenen çalışma bir dosyaya kaydedilmemiş olabilir: "değişmiş" sayılır
-        SS.toast('Son çalışmanız geri yüklendi.');
-      }
+      await recoverWork();
     } catch (_) { /* IndexedDB yoksa (ör. gizli pencere) sorun değil */ }
     els.editor.focus({ preventScroll: true });
   }

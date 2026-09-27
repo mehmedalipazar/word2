@@ -96,7 +96,26 @@ select {
   width: 56px; height: 26px; border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; color: var(--text); background: #fff;
 }
 .nums .chk input { margin: 0 2px 0 0; }
+.nums input[data-num="page"] { width: 44px; }
 .unit { color: var(--muted); font-size: 12px; }
+
+/* ---------- Cetvel (ruler.js) ---------- */
+.ruler { position: relative; flex: none; height: 22px; background: var(--bg); border-bottom: 1px solid var(--line); overflow: hidden; user-select: none; }
+.ruler-page {
+  position: absolute; top: 4px; bottom: 3px; left: 0; border: 1px solid #cfd4dc; border-radius: 2px;
+  background: linear-gradient(to right, #dfe3ea var(--ml), #fff var(--ml), #fff calc(100% - var(--mr)), #dfe3ea calc(100% - var(--mr)));
+}
+.ruler-ticks span { position: absolute; bottom: 0; width: 1px; background: #9aa1ac; }
+.ruler-ticks .min { height: 3px; }
+.ruler-ticks .mid { height: 6px; }
+.ruler-ticks .num { width: auto; background: none; bottom: 1px; transform: translateX(-50%); font-size: 9px; line-height: 1; color: #6a7280; }
+.rm { position: absolute; width: 11px; margin-left: -5.5px; background: #4b5563; cursor: ew-resize; }
+.rm.first { top: -4px; height: 7px; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.rm.hang { bottom: 2px; height: 6px; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.rm.left { bottom: -3px; height: 5px; }
+.rm.right { bottom: -3px; height: 8px; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.ruler-page.off .rm { display: none; }
+.ruler-page.list .rm { opacity: .35; cursor: default; }
 
 /* ---------- Çalışma alanı ---------- */
 .workspace { flex: 1; overflow: auto; position: relative; }
@@ -117,9 +136,13 @@ select {
     linear-gradient(to bottom, rgba(47, 91, 211, .07) 1px, transparent 1px);
   background-size: 0.5cm 0.5cm;
 }
-.page .pnum {
-  position: absolute; left: 0; right: 0; text-align: center; font: 10pt Calibri, Carlito, sans-serif; color: #333;
+/* Üst/alt bilgi: sol, orta, sağ yuva (Word'deki orta ve sağ sekme durakları gibi) */
+.page .hf {
+  position: absolute; display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px;
+  font: 10pt/1.2 Calibri, Carlito, sans-serif; color: #333; white-space: pre; pointer-events: none;
 }
+.page .hf span:nth-child(2) { text-align: center; }
+.page .hf span:nth-child(3) { text-align: right; }
 .pclip { position: absolute; left: 0; overflow: clip; }
 
 .img-obj { position: absolute; pointer-events: auto; cursor: move; touch-action: none; }
@@ -152,27 +175,41 @@ select {
 
 /* Metin akışı ve dışlama alanları (görünmez float'lar) */
 .ex { shape-outside: border-box; pointer-events: none; user-select: none; }
+.flow.nobands > .ex { display: none; } /* biçim komutu süresince (core.js: withoutBands) */
 
 .editor {
   outline: none; min-height: 20px;
-  white-space: pre-wrap; overflow-wrap: break-word; tab-size: 4;
-  font-family: Calibri, Carlito, "Segoe UI", sans-serif; font-size: 11pt; line-height: 1.35; color: #000;
+  /* Sekme durakları Word'ün varsayılanı gibi her 1,27 cm'de (docx.js: defaultTabStop 720) */
+  white-space: pre-wrap; overflow-wrap: break-word; tab-size: 1.27cm;
+  /* Satır aralığı Word'ün Normal stili gibi 1,08 satır: 1,08 × Calibri'nin tek satır katsayısı 1,221 (core.js: lineSpacing) */
+  font-family: Calibri, Carlito, "Segoe UI", sans-serif; font-size: 11pt; line-height: 1.3177; color: #000;
   caret-color: #000;
   /* Word varsayılan olarak kerning ve bitişik harf kullanmaz: satır kırılımları Word'e yakın olsun */
   font-kerning: none; font-variant-ligatures: none;
 }
 .editor p, .editor div { margin: 0 0 8pt; }
-.editor h1, .editor h2, .editor h3 { font-weight: bold; line-height: 1.25; }
+.editor h1, .editor h2, .editor h3 { font-weight: bold; }
 .editor h1 { font-size: 18pt; margin: 12pt 0 6pt; }
 .editor h2 { font-size: 14pt; margin: 10pt 0 5pt; }
 .editor h3 { font-size: 12pt; margin: 8pt 0 4pt; }
+/* Listeler Word'ün varsayılan asılı girintisiyle: işaret 0,635 cm'de, metin ve taşan satırlar 1,27 cm'de,
+   her alt düzey 1,27 cm içeride. İşaret içeride (inside) kalır: dışarıdaki işareti şerit float'larının margin
+   alanı kaybettiriyor. İşaretin sonundaki sekme metni 1,27 cm durağına hizalar (tab-size). */
 .editor ul, .editor ol { margin: 0 0 8pt; padding-left: 0; }
-.editor ul ul, .editor ul ol, .editor ol ol, .editor ol ul { margin: 0; padding-left: 24px; }
-.editor li { list-style-position: inside; margin: 0; }
+/* 0,6351 cm: Chrome bu kalıtılan girintiyi listeden taşınan metne kopyalar; core.js: normalizeBlocks bu değerden tanıyıp siler */
+.editor li { list-style-position: inside; margin: 0; padding-left: 1.27cm; text-indent: -0.6351cm; }
+.editor li > ul, .editor li > ol { margin: 0; }
+.editor ul > ul, .editor ul > ol, .editor ol > ul, .editor ol > ol { margin: 0; padding-left: 1.27cm; } /* Chrome'un girinti biçimi */
+.editor ul > li::marker { content: "\2022\9"; }
+.editor :is(ul, ol) ul > li::marker { content: "o\9"; }
+.editor :is(ul, ol) :is(ul, ol) ul > li::marker { content: "\25AA\9"; }
+.editor ol > li::marker { content: counter(list-item) ".\9"; }
+.editor :is(ul, ol) ol > li::marker { content: counter(list-item, lower-alpha) ".\9"; }
+.editor :is(ul, ol) :is(ul, ol) ol > li::marker { content: counter(list-item, lower-roman) ".\9"; }
 .editor li > p { display: inline; margin: 0; }
 .editor .el::before { content: "\a0"; } /* boş satırlar da sayfa aralarından kaçsın (core.js: markEmptyLines) */
-.editor ol ol { list-style-type: lower-alpha; }
-.editor ol ol ol { list-style-type: lower-roman; }
+/* Üst/alt simge Word'deki gibi yaklaşık 2/3 boyutta; yükseltilmiş kutu satır aralığını açmasın */
+.editor sup, .editor sub { font-size: 65%; line-height: 0; }
 .editor.empty > :first-child::before {
   content: "Yazmaya başlayın… Resimleri sayfaya sürükleyip bırakın ya da yapıştırın; sonra istediğiniz yere taşıyın.";
   position: absolute; color: #9aa1ac; pointer-events: none; font-style: italic;
@@ -209,6 +246,22 @@ select {
 .guide.h { height: calc(1px / var(--z)); }
 .drop-hint { outline: 3px dashed var(--accent); outline-offset: -3px; }
 
+/* ---------- Bul ve değiştir (find.js) ---------- */
+.find {
+  position: fixed; right: 18px; z-index: 50; width: 350px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px rgba(20, 30, 50, .18);
+}
+.find[hidden] { display: none; }
+.find-row { display: flex; align-items: center; gap: 4px; }
+.find input:not([type]) { flex: 1; min-width: 0; height: 28px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; }
+.find input:not([type]):focus { outline: none; border-color: var(--accent); }
+.find-count { color: var(--muted); font-size: 12px; min-width: 56px; text-align: right; white-space: nowrap; }
+.find .opts { gap: 14px; font-size: 12px; color: var(--muted); }
+.find .opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.btn.small { height: 28px; padding: 0 9px; }
+::highlight(ss-bul) { background-color: #ffe58f; }
+::highlight(ss-bul-secili) { background-color: #f5a623; }
+
 /* ---------- Durum çubuğu ---------- */
 .statusbar {
   display: flex; align-items: center; gap: 16px; height: 32px; padding: 0 12px;
@@ -231,8 +284,14 @@ select {
 .dialog label.chk { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 13px; }
 .dialog fieldset { border: 1px solid var(--line); border-radius: 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .dialog legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
-.dialog input[type=number] { height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; width: 100%; }
+.dialog input[type=number], .dialog input[inputmode] { height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; width: 100%; }
 .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dialog select { width: 100%; }
+.dialog .hf-set { grid-template-columns: auto 1fr 1fr 1fr; align-items: center; }
+.dialog .hf-set input:not([type]) { height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; min-width: 0; }
+.dialog .hf-lbl { font-size: 12px; color: var(--muted); }
+.dialog .wide { grid-column: 1 / -1; }
+.dialog .hint-text { margin: 0; font-size: 12px; color: var(--muted); }
 
 .toast {
   position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%) translateY(20px);
@@ -256,6 +315,7 @@ body.dragging, body.dragging * { user-select: none !important; }
   .page { box-shadow: none; background: #fff !important; background-image: none !important; }
   .page .mguide { display: none; }
   .editor { caret-color: transparent; }
+  ::highlight(ss-bul), ::highlight(ss-bul-secili) { background-color: transparent; }
   /* Satırlar zaten sayfa sınırlarına göre dizildi: tarayıcı dul/öksüz satır kuralıyla satır kaydırmasın */
   .editor, .editor * { orphans: 1; widows: 1; break-before: auto; break-after: auto; break-inside: auto; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

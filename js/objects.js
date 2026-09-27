@@ -243,16 +243,40 @@
   }
 
   // ---------- Sürükleme ----------
+  // İşaretçi çalışma alanının üst/alt kenarına (ya da dışına) gelince belge kayar; sürüklenen nesne
+  // işaretçinin altında kalır. Böylece resim başka bir sayfaya sürüklenebilir.
+  const EDGE = 40;
   function track(onMove, onEnd) {
+    let last = null;
+    let raf = 0;
+    const scrollStep = () => {
+      raf = 0;
+      if (!last) return;
+      const ws = els.workspace;
+      const r = ws.getBoundingClientRect();
+      const d = last.clientY < r.top + EDGE ? last.clientY - (r.top + EDGE) : last.clientY > r.bottom - EDGE ? last.clientY - (r.bottom - EDGE) : 0;
+      if (!d) return;
+      const before = ws.scrollTop;
+      ws.scrollTop += SS.clamp(Math.round(d / 2), -40, 40) || Math.sign(d);
+      if (ws.scrollTop !== before) onMove(last);
+      raf = requestAnimationFrame(scrollStep);
+    };
+    const move = (ev) => {
+      last = ev;
+      onMove(ev);
+      if (!raf) raf = requestAnimationFrame(scrollStep);
+    };
     const up = () => {
-      window.removeEventListener('pointermove', onMove);
+      last = null;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('dragging');
       guides = [];
       onEnd();
     };
-    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
   }
@@ -593,14 +617,27 @@
     finishEdit();
   };
 
-  function cloneImages(list, offset) {
+  // target (yapıştırma): { page, y } → grup o sayfaya, üst kenarı y'de olacak biçimde taşınır (x korunur)
+  function cloneImages(list, offset, target) {
     let z = maxZ();
     const g = app.geom();
     const ids = [];
+    let shift = null;
+    if (target) {
+      const top = Math.min(...list.map((i) => i.page * g.stride + app.objBox(i).y));
+      const bottom = Math.max(...list.map((i) => i.page * g.stride + app.objBox(i).y + app.objBox(i).h));
+      // Grup sayfaya sığsın: alttan taşarsa yukarı al
+      const y = SS.clamp(target.y, g.m.t, Math.max(g.m.t, g.PH - g.m.b - (bottom - top)));
+      shift = target.page * g.stride + y - top;
+    }
     for (const src of list) {
       const img = { ...src, id: SS.uid('img'), z: ++z, locked: false };
       if (src.caption) img.caption = { ...src.caption };
-      setDocPos(img, img.x + offset, img.page * g.stride + img.y + offset);
+      if (shift === null) setDocPos(img, img.x + offset, img.page * g.stride + img.y + offset);
+      else {
+        img.page = target.page; // grup hedef sayfaya konur
+        img.y = src.page * g.stride + src.y + shift - target.page * g.stride;
+      }
       clampToPage(img);
       state.images.push(img);
       ids.push(img.id);
@@ -731,12 +768,24 @@
       inp.disabled = !one;
       if (!one) inp.value = '';
       if (!one || document.activeElement === inp) continue;
-      const k = inp.dataset.num;
-      inp.value = k === 'rot' ? String(SS.round(one.rot || 0, 1)) : String(SS.round(U.pxToCm(one[k]), 2));
+      inp.value = fieldValue(one, inp.dataset.num);
     }
   };
+  function fieldValue(img, k) {
+    if (k === 'rot') return String(SS.round(img.rot || 0, 1));
+    if (k === 'page') return String(img.page + 1);
+    return String(SS.round(U.pxToCm(img[k]), 2));
+  }
 
-  numInputs.forEach((inp) =>
+  // Elle girilen konumda şeklin tamamı sayfada kalsın (sürüklemedeki gibi yalnızca bir kenarı değil)
+  function clampInside(img) {
+    const g = app.geom();
+    const bb = app.objBox(img);
+    img.x += SS.clamp(bb.x, 0, Math.max(0, g.PW - bb.w)) - bb.x;
+    img.y += SS.clamp(bb.y, 0, Math.max(0, g.PH - bb.h)) - bb.y;
+  }
+
+  numInputs.forEach((inp) => {
     inp.addEventListener('change', () => {
       const imgs = selImages();
       const img = imgs.length === 1 ? imgs[0] : null;
@@ -744,6 +793,7 @@
       if (!img || !isFinite(v)) return app.updateCtxBar();
       const k = inp.dataset.num;
       if (k === 'rot') img.rot = ((((v + 180) % 360) + 360) % 360) - 180;
+      else if (k === 'page') img.page = SS.clamp(Math.round(v), 1, state.pageCount + 1) - 1; // en çok bir yeni sayfa
       else {
         const px = U.cmToPx(v);
         if (k === 'x') img.x = px;
@@ -758,10 +808,31 @@
           img.h = nh;
         }
       }
-      clampToPage(img);
+      if (k === 'x' || k === 'y' || k === 'page') clampInside(img);
+      else clampToPage(img);
       finishEdit();
-    })
-  );
+      inp.value = fieldValue(img, k); // odaktaki alan da gerçek (sınırlanmış) değeri göstersin
+      if (k === 'page') scrollToImage(img);
+    });
+    // Enter: uygula ve belgeye dön (Ctrl+Z, oklar resme işlesin); Esc: vazgeç
+    inp.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation(); // odak belgeye dönünce aynı Enter "şekil yazısı düzenle" sayılmasın
+      if (e.key === 'Escape') {
+        const imgs = selImages();
+        inp.value = imgs.length === 1 ? fieldValue(imgs[0], inp.dataset.num) : '';
+      }
+      inp.blur();
+    });
+  });
+
+  function scrollToImage(img) {
+    const g = app.geom();
+    const ws = els.workspace;
+    const y = els.scaler.offsetTop + (img.page * g.stride + img.y) * state.zoom;
+    if (y < ws.scrollTop + 20 || y > ws.scrollTop + ws.clientHeight - 60) ws.scrollTop = y - 80;
+  }
 
   // ---------- Resim ekleme ----------
   function caretSpot() {
@@ -864,13 +935,23 @@
   document.addEventListener('copy', (e) => copySel(e, false));
   document.addEventListener('cut', (e) => copySel(e, true));
 
+  // Yapıştırma yeri (Word'deki gibi): imleç metindeyse imlecin sayfası ve satırı; değilse ekranda görünen
+  // sayfa. Görünen sayfa resimlerin kendi sayfasıysa eski yerleri (kopyada biraz kaydırılmış) kullanılır.
+  function pasteTarget(items) {
+    if (document.activeElement === els.editor && app.getCaretRange && app.getCaretRange()) return caretSpot();
+    const vp = app.visiblePage ? app.visiblePage() : 0;
+    if (items.some((i) => i.page === vp)) return null;
+    return { page: vp, y: Math.min(...items.map((i) => app.objBox(i).y)) };
+  }
+
   app.pasteObjects = function (e) {
     const dt = e.clipboardData;
     if (clip && dt.getData('text/plain') === CLIP_MARK + clip.id) {
       e.preventDefault();
-      const offset = clip.cut ? 0 : 16;
+      const target = pasteTarget(clip.items);
+      const offset = clip.cut || target ? 0 : 16;
       clip.cut = false;
-      cloneImages(clip.items, offset);
+      cloneImages(clip.items, offset, target);
       return true;
     }
     const files = [...dt.files].filter((f) => f.type.startsWith('image/'));

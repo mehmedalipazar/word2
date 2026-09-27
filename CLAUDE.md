@@ -31,7 +31,7 @@ The project has no build step, no dependencies and no `package.json`. The target
 
 Script order in `index.html` is the dependency order:
 
-`util → zip → core → text → objects → docx → docximport → main`
+`util → zip → core → text → find → ruler → objects → docx → docximport → main`
 
 Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module functions live on `SS.app`, which `core.js` creates. Later modules call earlier ones through `app.*`. Core calls back through optional hooks that `main.js` sets:
 
@@ -51,12 +51,22 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 - **`app.layout()`** marks empty lines, renders the bands, sizes the page breaks, then recomputes the page count and repeats until the count is stable. The page count comes from where the text ends, which pages have images, and `minPages`.
   - After changing images, call `app.renderImages()` and then `app.layout()`.
   - `app.relayoutAll()` also re-renders the pages.
+- **Pagination rules (Word's widow/orphan control, keep-with-next and keep-lines for headings).** CSS `orphans`/`widows` only work in real fragmentation, so they are emulated with bands:
+  - `keep[k]` shortens page k's text area from the bottom: `computeBands()` adds a full band `[k*stride + ch - keep[k], k*stride + ch]`, which pushes the offending lines to the next page. Print mode uses the same bands.
+  - `paginateBoundary(k)` decides one page boundary from the live layout (`boundaryCut`: measure line rects of the paragraph units around the boundary). Boundaries are processed in order; every band change is a full relayout (~28 ms for 47 pages), so the work is incremental:
+    - `app.markDirty(from, to)` records changed pages. Text edits mark the selection's pages (`markDirtyAtSelection`, measured inside the next `layout()`), `renderImages()` diffs image signatures and marks their old/new pages, load/undo/page setup mark everything.
+    - The pass stops early once a page past the dirty range starts at the same line as before (`pageKey`).
+    - While typing it runs in the background (300 ms after the last change, ≤24 ms chunks). `app.paginateNow()` finishes it synchronously: export, print (`beforePrint`) and docx import (before measuring each placeholder, up to its page) call it.
+    - History snapshots store `keep`, so undo/redo lay out correctly at once.
+  - docx export writes the same rules (`widowControl` in `pPrDefault`, `keepNext`/`keepLines` in heading styles) so page breaks match Word.
+- **Editing commands and bands.** Chrome's editing commands relayout at every step; with dozens of band floats this grows quadratically (bold on 47 pages took 14 s). `app.withoutBands(fn)` runs a command with the bands hidden (`.flow.nobands`), and `beforeinput` does the same for native edits of multi-paragraph selections. Only 3 bands are pre-built past the last page (`EXTRA_BANDS`).
 - **Browser constraints.** Each of these caused a real bug. Don't undo them:
   - Band floats must be **direct children of `#flow`**. Inside a zero-height wrapper, print pagination loses their continuation on later pages.
   - A float must **never be wider than the content width `cw`**. If it is, Chrome also blocks text from its margin-top area.
   - In **print mode** (`app.printMode`, gap = 0), bands are emitted only for real page boundaries and are cut at every physical page boundary. No float may cross a printed page.
   - Lines containing only a `<br>` ignore floats. `markEmptyLines()` adds class `el`, whose CSS `::before{content:"\a0"}` makes those lines skip page gaps too. `serialize()` strips the class.
   - Print CSS sets `orphans`/`widows` to 1, so the browser doesn't re-break lines the bands already placed.
+  - List markers must stay `list-style-position: inside`. With band floats present, Chrome loses `outside` markers (the floats' margin-top area breaks their placement). The hanging indent comes from `li { padding-left: 1.27cm; text-indent: -0.635cm }` plus a tab at the end of `::marker` content that aligns the text to the 1.27 cm tab stop (`tab-size: 1.27cm`).
 - **Page break:** `<div class="pb" contenteditable="false">`. `fitPageBreaks()` stretches it to the end of the current page's text area on every layout.
 - **Captions:** `img.caption = {text, label, pos}`.
   - Rendered as `.cap` next to the image, below or above the rotated image's bounding box. The caption itself is never rotated.
@@ -69,19 +79,26 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 
 ### History and persistence
 
-- **One custom undo stack for text and images.** `app.commit(kind)` snapshots the editor HTML, the images as JSON, and the page settings.
+- **One custom undo stack for text and images.** `app.commit(kind)` snapshots the editor HTML, the images as JSON, the page settings (incl. header/footer) and the pagination bands (`keep`).
   - Kinds `typing`, `deleting` and `nudge` merge with the previous entry when within 1.5 s.
   - Native undo is intercepted: `beforeinput` `historyUndo`/`historyRedo` and Ctrl+Z.
   - Every user-visible change must end with `app.commit(...)`.
-- **`.sayfa` files** are the JSON from `app.serialize()`: `app: 'SerbestSayfa'`, the HTML, the images, the used assets and the page settings.
-- **Autosave** goes to the IndexedDB key `autosave`.
+- **`.sayfa` files** are the JSON from `app.serialize()`: `app: 'SerbestSayfa'`, the HTML, the images, the used assets, the page settings and `hf` (header/footer). Old files with `pageNumbers: true` load as a centered `{sayfa}` footer.
+- **Header/footer** (`state.hf`): `{ header: [left, center, right], footer: [...], firstPage }`. Slots are plain text with `{sayfa}` / `{toplam}` tokens. They are drawn on the pages (`renderPages`), exported as header/footer parts with center/right tab stops and PAGE/NUMPAGES fields (`firstPage` → `titlePg` + empty first-page parts), and imported from the first non-empty paragraph of Word's default header/footer.
+- **Autosave** is per tab: IndexedDB key `autosave:<tab id>`, where the tab id lives in `sessionStorage`. Each open tab holds a Web Lock (`serbestsayfa-sekme:<id>`). A new tab adopts only records whose lock is free (closed tabs). The old single `autosave` key is adopted the same way.
+  - On `pagehide`, `beforeunload` and `visibilitychange→hidden`, unsaved changes are also written synchronously to `localStorage` (`serbestsayfa-acil:<id>`), because async IndexedDB writes don't survive unload. On startup the newer of the two is used.
+  - `beforeunload` asks before closing while there are unsaved changes (cleared by save, open, new, and Word export).
 
 ### Text editing (text.js)
 
-- Formatting uses `execCommand` with `styleWithCSS`.
-- Font size uses the `fontSize 7` marker trick: apply size 7, then rewrite those marked elements to pt.
-- Paste goes through `app.sanitizeHTML()`. It reduces Word and web HTML to `p/h1-3/ul/ol/li/b/i/u/s/sub/sup/span/br` and `.pb`, and turns Word's fake list paragraphs into real lists.
-- Keep editor HTML within that vocabulary. Export and import only understand it.
+- Formatting uses `execCommand` with `styleWithCSS`. Font size (`fontSize 7` marker trick: apply size 7, then rewrite those marked elements to pt) and sub/superscript (`app.setScript`, which must produce `<sub>/<sup>`, not a `vertical-align` span) turn `styleWithCSS` off for the command.
+- **Block structure.** Chrome's list commands can put the list inside the paragraph (`<p><ol>…</ol></p>`). Re-parsing that HTML creates empty paragraphs. `app.normalizeBlocks()` splits such paragraphs after every edit (`ensureContent`); after `load`/undo it also drops the parser's childless `<p></p>`.
+- **Line spacing** is stored in CSS `line-height`: a unitless value is a Word "multiple" × the font's single-line factor (`SS.lineFactor`, measured with `line-height: normal`; Calibri 1.221). A value with units is Word's "at least". `app.lineSpacing(block)` / `app.cssLineHeight(block, multiple)` convert. The default (`.editor`, 1.3177) is Word's 1.08 lines. Export writes `lineRule="auto"` / `atLeast`.
+- **Backspace at a paragraph start** (`backspaceAtStart`) follows Word: first a list item becomes an indented paragraph (the list splits and numbering continues via `ol[start]`), then the first-line indent goes, then the left indent shrinks by 1.27 cm, then a preceding page break (`.pb`) is removed.
+- The Paragraph dialog (`app.paragraphDialog`) writes `margin-left/right`, `text-indent` (+ first line, − hanging), `margin-top/bottom` in pt and line spacing. The ruler (`ruler.js`) shows and drags the same indents for the caret's paragraph (read-only for list items, whose indent comes from the list level).
+- Paste goes through `app.sanitizeHTML()`. It reduces Word and web HTML to `p/h1-3/ul/ol/li/b/i/u/s/sub/sup/span/br` and `.pb`, turns Word's fake list paragraphs (with their `mso-list` levels) into nested lists, and keeps Word's pt/cm paragraph indents and spacing and `line-height: %`.
+- Keep editor HTML within that vocabulary (plus `ol[start]`). Export and import only understand it.
+- Find & replace (`find.js`) highlights matches with the CSS Custom Highlight API (no DOM changes) and edits text nodes directly. Replace All also covers captions and is one undo step.
 
 ### Objects (objects.js)
 
@@ -92,9 +109,10 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 ### DOCX export (docx.js)
 
 - The ZIP is store-only (`zip.js`).
-- Images are `wp:anchor` with `relativeFrom="page"`. Each is anchored in the run at the first character of its page.
-  - `findPageStarts` finds that character by measuring the live layout, so **export depends on the current DOM layout**.
+- Images are `wp:anchor` with `relativeFrom="page"`. Word and LibreOffice put an anchored object on the page of its anchor *paragraph*, so a page's images are anchored at the start of a paragraph that **starts** on that page, the one nearest the page's vertical middle (`placeAnchors`), which tolerates a few lines of line-breaking drift. If no paragraph starts on the page, the page's first character is used.
+  - Paragraph starts and `findPageStarts` are measured from the live layout, so **export depends on the current DOM layout** (it calls `app.paginateNow()` first).
   - A page with no text gets a holder paragraph with `pageBreakBefore`, and its images are written with `wrapNone`.
+- Lists use Word's default indents: text at `720·(level+1)` twips, marker 360 twips to its left. A nested list written directly inside a list (Chrome's indent form `<ul><li/><ul>…</ul></ul>`) is exported as the next level.
 - Captions are `wps` text boxes inside `mc:AlternateContent`, with the `Caption` style and a `SEQ` field.
 - Page breaks become `pageBreakBefore` on the next paragraph.
 - Run and paragraph formatting is read from computed styles.
@@ -104,10 +122,11 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 
 - **Reading:** unzips with `DecompressionStream('deflate-raw')` and resolves styles, theme fonts and numbering. Heading numbers are simulated and written into the text.
 - **HTML with placeholders:** drawings become `<span class="ph">` placeholders in the generated HTML.
-- **Placement:** after `app.load()`, `placeAll()` goes through the placeholders in document order. For each one it measures the placeholder, creates the image object, and re-runs layout before the next.
+- **Paragraph formatting:** the paragraph style's font and size go on the block element itself; runs only get spans where they differ. `auto` line spacing becomes a multiple × `SS.lineFactor` (unspecified = single). List level = rank of the effective left indent within a run of list paragraphs (so Word's single-level "List Bullet 2" becomes level 2); an ordered list that resumes after other paragraphs gets `ol[start]`.
+- **Placement:** after `app.load()`, `placeAll()` goes through the placeholders in document order. For each one it finishes pagination up to the placeholder's page, measures the placeholder, creates the image object, and re-runs layout before the next.
   - Inline images become `topbottom` at their line.
   - Anchored images follow Word's positioning rules.
 - **Caption attachment** looks for:
   - A paragraph right after (or right before) an image-only paragraph that matches `CAPTION_RE` or uses the `caption` style.
   - A caption-like text box in the same drawing or group.
-- **Lossy conversions:** tables become tab-separated paragraphs. EMF/WMF/TIFF images, charts and footnotes are skipped, and `SS.importSummary()` tells the user how many.
+- **Lossy conversions:** tables become tab-separated paragraphs. EMF/WMF/TIFF images, charts, footnotes and header/footer content beyond the first text line are skipped, and `SS.importSummary()` tells the user how many.

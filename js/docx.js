@@ -86,18 +86,20 @@
 
   // ---------- Numaralandırma ----------
   function makeNumbering() {
-    const nums = []; // { id, ordered }
+    const nums = []; // { id, ordered, start }
     return {
-      add(ordered) {
+      add(ordered, start = 1) {
         const id = nums.length + 1;
-        nums.push({ id, ordered });
+        nums.push({ id, ordered, start });
         return id;
       },
       xml() {
+        // Word'ün varsayılan liste girintisi (editör css'i de aynı): metin her düzeyde 1,27 cm içeride,
+        // işaret 0,635 cm solunda
         const lvls = (ordered) => {
           let s = '';
           for (let i = 0; i < 9; i++) {
-            const left = 360 * (i + 1);
+            const left = 720 * (i + 1);
             if (ordered) {
               const fmt = ['decimal', 'lowerLetter', 'lowerRoman'][i % 3];
               s += `<w:lvl w:ilvl="${i}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/><w:lvlText w:val="%${i + 1}."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="${left}" w:hanging="360"/></w:pPr></w:lvl>`;
@@ -116,7 +118,7 @@
           nums
             .map((n) =>
               n.ordered
-                ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`
+                ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${n.start}"/></w:lvlOverride></w:num>`
                 : `<w:num w:numId="${n.id}"><w:abstractNumId w:val="0"/></w:num>`
             )
             .join('') +
@@ -128,6 +130,7 @@
 
   // ---------- Ana dışa aktarma ----------
   SS.exportDocx = async function (app) {
+    if (app.paginateNow) app.paginateNow(); // sayfa sonları kesinleşsin: çapalar canlı düzenden ölçülür
     const state = app.state;
     const g = app.geom();
     const ed = app.els.editor;
@@ -235,16 +238,52 @@
       events.get(node).push({ offset, type, page });
     };
     const trailing = [];
+    const anchorPages = []; // metinli ve resimli sayfalar: çapa yeri paragraflar toplanınca seçilir (placeAnchors)
     for (let k = 0; k < state.pageCount; k++) {
       const s = starts[k];
       const onPage = s && s.top < k * g.stride + g.ch + 1;
       if (onPage) {
-        if (imgsOnPage[k]) addEvent(s.node, s.offset, 'anchor', k);
+        if (imgsOnPage[k]) anchorPages.push(k);
       } else if (s) addEvent(s.node, s.offset, 'holder', k); // metinsiz sayfa (ör. tam sayfa resim)
       else trailing.push(k); // metnin bittiği yerden sonraki sayfalar
     }
-    for (const list of events.values())
-      list.sort((a, b) => a.offset - b.offset || (a.type === b.type ? 0 : a.type === 'holder' ? -1 : 1));
+    // Word ve LibreOffice nesneyi çapa PARAGRAFININ sayfasına koyar. Çapa bir paragrafın ortasına düşerse
+    // (sayfa paragraf ortasında başlıyorsa) resim paragrafın başladığı önceki sayfaya kayar. Bu yüzden çapa,
+    // o sayfada BAŞLAYAN paragraflardan sayfa ortasına en yakın olanın başına konur: satır kırılımı farkıyla
+    // metin birkaç satır kaysa da paragraf aynı sayfada kalır. Sayfada başlayan paragraf yoksa (sayfayı aşan
+    // uzun paragraf) sayfanın ilk karakteri kullanılır.
+    function placeAnchors(units) {
+      const rng = document.createRange();
+      const visibleTop = (rects) => {
+        for (const r of rects) if (r.width || r.height) return app.clientToFlow(0, r.top).y;
+        return NaN;
+      };
+      const topOf = (n) => {
+        if (n.nodeType !== 3) return visibleTop(n.getClientRects());
+        for (let i = 0; i < n.length; i++) {
+          rng.setStart(n, i);
+          rng.setEnd(n, i + 1);
+          const t = visibleTop(rng.getClientRects());
+          if (!isNaN(t)) return t;
+        }
+        return NaN;
+      };
+      const heads = units.map((u) => {
+        const first = collectInline(u.el)[0];
+        return first ? { first, top: topOf(first) } : null;
+      }).filter((h) => h && !isNaN(h.top));
+      for (const k of anchorPages) {
+        const top = k * g.stride;
+        const mid = top + g.ch / 2;
+        let best = null;
+        for (const h of heads)
+          if (h.top >= top - 1 && h.top < top + g.ch + 1 && (!best || Math.abs(h.top - mid) < Math.abs(best.top - mid))) best = h;
+        if (best) addEvent(best.first, 0, 'anchor', k);
+        else addEvent(starts[k].node, starts[k].offset, 'anchor', k);
+      }
+      for (const list of events.values())
+        list.sort((a, b) => a.offset - b.offset || (a.type === b.type ? 0 : a.type === 'holder' ? -1 : 1));
+    }
     const consumed = new Set();
     const anchorsFor = (k, noWrap) => {
       consumed.add(k);
@@ -263,6 +302,7 @@
       const font = firstFamily(cs.fontFamily);
       if (font !== DEFAULT_FONT) p.push(`<w:rFonts w:ascii="${esc(font)}" w:hAnsi="${esc(font)}" w:eastAsia="${esc(font)}" w:cs="${esc(font)}"/>`);
       if (parseInt(cs.fontWeight, 10) >= 600) p.push('<w:b/><w:bCs/>');
+      else if (/^H[1-6]$/.test(blockEl.tagName)) p.push('<w:b w:val="0"/><w:bCs w:val="0"/>'); // başlık stili kalın: normal metin açıkça
       if (cs.fontStyle === 'italic' || cs.fontStyle === 'oblique') p.push('<w:i/><w:iCs/>');
       let underline = false;
       let strike = false;
@@ -311,15 +351,19 @@
       if (o.pageBreakBefore) p.push('<w:pageBreakBefore/>');
       if (o.numId && !o.cont) p.push(`<w:numPr><w:ilvl w:val="${o.ilvl}"/><w:numId w:val="${o.numId}"/></w:numPr>`);
       const fontPx = parseFloat(cs.fontSize);
-      const line = parseFloat(cs.lineHeight) || fontPx * 1.2;
+      // Birimsiz satır yüksekliği Word'ün "satır katı"dır (auto); birimli değer "En az"
+      const ls = app.lineSpacing(blockEl);
+      const line = ls.px ? `w:line="${twip(ls.px)}" w:lineRule="atLeast"` : `w:line="${Math.round(240 * ls.multiple)}" w:lineRule="auto"`;
       const before = o.cont ? 0 : Math.max(0, o.mt - prevAfter);
-      p.push(`<w:spacing w:before="${twip(before)}" w:after="${twip(o.mb)}" w:line="${twip(line)}" w:lineRule="atLeast"/>`);
-      if (o.numId && o.cont) p.push(`<w:ind w:left="${360 * (o.ilvl + 1)}"/>`);
+      p.push(`<w:spacing w:before="${twip(before)}" w:after="${twip(o.mb)}" ${line}/>`);
+      if (o.numId && o.cont) p.push(`<w:ind w:left="${720 * (o.ilvl + 1)}"/>`);
       else if (!o.numId) {
         const ml = parseFloat(cs.marginLeft) || 0;
+        const mr = parseFloat(cs.marginRight) || 0;
         const ti = o.cont ? 0 : parseFloat(cs.textIndent) || 0;
         const ind = [];
         if (ml > 0) ind.push(`w:left="${twip(ml)}"`);
+        if (mr > 0) ind.push(`w:right="${twip(mr)}"`);
         if (ti > 0) ind.push(`w:firstLine="${twip(ti)}"`);
         else if (ti < 0) ind.push(`w:hanging="${twip(-ti)}"`);
         if (ind.length) p.push(`<w:ind ${ind.join(' ')}/>`);
@@ -348,13 +392,17 @@
     }
 
     const body = [];
+    const units = []; // yazılacak paragraflar, belge sırasıyla: { el, o }
     let pendingBreak = false; // editördeki sayfa sonu -> sonraki paragrafa "öncesinde sayfa sonu"
-    // Bir blok -> bir ya da daha fazla w:p (metinsiz sayfa araya girerse paragraf bölünür)
-    function emitBlock(el, o) {
+    function unit(el, o) {
       if (pendingBreak) {
         o = { ...o, pageBreakBefore: true };
         pendingBreak = false;
       }
+      units.push({ el, o });
+    }
+    // Bir blok -> bir ya da daha fazla w:p (metinsiz sayfa araya girerse paragraf bölünür)
+    function emitBlock(el, o) {
       const styleEl = el.nodeType === 3 ? el.parentElement : el;
       const items = collectInline(el);
       const paras = [];
@@ -394,7 +442,7 @@
     function walk(nodes, listCtx) {
       for (const n of nodes) {
         if (n.nodeType === 3) {
-          if (n.nodeValue.trim()) emitBlock(n, { mt: 0, mb: 0 });
+          if (n.nodeValue.trim()) unit(n, { mt: 0, mb: 0 });
           continue;
         }
         if (n.nodeType !== 1) continue;
@@ -402,15 +450,18 @@
         if (tag === 'UL' || tag === 'OL') {
           const ordered = tag === 'OL';
           const depth = listCtx ? listCtx.depth + 1 : 0;
-          const numId = listCtx && listCtx.ordered === ordered ? listCtx.numId : numbering.add(ordered);
+          const start = ordered ? Math.max(1, parseInt(n.getAttribute('start'), 10) || 1) : 1; // bölünen listede numara devam eder
+          const numId = listCtx && listCtx.ordered === ordered ? listCtx.numId : numbering.add(ordered, start);
           const ctx = { ordered, depth, numId };
-          const lis = [...n.children].filter((c) => c.tagName === 'LI');
+          // Chrome'un girinti komutu alt listeyi maddenin içine değil listenin kendisine koyar: <ul><li/><ul>…</ul></ul>
+          const items = [...n.children].filter((c) => /^(LI|UL|OL)$/.test(c.tagName));
           const lcs = getComputedStyle(n);
-          lis.forEach((li, i) => {
+          items.forEach((li, i) => {
+            if (li.tagName !== 'LI') return void walk([li], ctx);
             const mt = i === 0 && !listCtx ? parseFloat(lcs.marginTop) || 0 : 0;
             const nested = [...li.children].filter((c) => c.tagName === 'UL' || c.tagName === 'OL');
-            const mb = i === lis.length - 1 && !listCtx && !nested.length ? parseFloat(lcs.marginBottom) || 0 : 0;
-            emitBlock(li, { numId, ilvl: Math.min(depth, 8), mt, mb });
+            const mb = i === items.length - 1 && !listCtx && !nested.length ? parseFloat(lcs.marginBottom) || 0 : 0;
+            unit(li, { numId, ilvl: Math.min(depth, 8), mt, mb });
             walk(nested, ctx);
           });
         } else if (/^(P|H[1-6]|DIV|BLOCKQUOTE|PRE)$/.test(tag)) {
@@ -418,12 +469,14 @@
           else if (n.querySelector('p,h1,h2,h3,h4,h5,h6,div,ul,ol,li,blockquote,pre')) walk([...n.childNodes], listCtx);
           else {
             const lvl = /^H([1-6])$/.exec(tag);
-            emitBlock(n, { style: lvl ? 'Heading' + Math.min(3, +lvl[1]) : null, ...blockMargins(n) });
+            unit(n, { style: lvl ? 'Heading' + Math.min(3, +lvl[1]) : null, ...blockMargins(n) });
           }
-        } else emitBlock(n, blockMargins(n));
+        } else unit(n, blockMargins(n));
       }
     }
     walk([...ed.childNodes], null);
+    placeAnchors(units);
+    units.forEach((u) => emitBlock(u.el, u.o));
     if (pendingBreak) body.push('<w:p><w:pPr><w:pageBreakBefore/></w:pPr></w:p>');
     for (const k of trailing) body.push(holderPara(k));
     // Güvenlik: herhangi bir nedenle çapası yazılamamış sayfa kalırsa resimler kaybolmasın
@@ -431,15 +484,46 @@
       if (list && !consumed.has(k)) body.push(holderPara(k));
     });
 
+    // ---- Üst/alt bilgi ----
+    // Sol/orta/sağ yuvalar tek paragrafta sekmeyle ayrılır (orta ve sağ sekme durağı); {sayfa} ve {toplam}
+    // PAGE ve NUMPAGES alanı olur. "İlk sayfada gösterme": titlePg + boş ilk sayfa üst/alt bilgisi.
+    const hf = state.hf;
+    const hfUsed = (slots) => slots.some((s) => s.trim());
+    const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+    const field = (instr) =>
+      `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> ${instr} </w:instrText></w:r>` +
+      '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>';
+    const hfRuns = (s) =>
+      s.split(/(\{sayfa\}|\{toplam\})/).map((t) =>
+        t === '{sayfa}' ? field('PAGE') : t === '{toplam}' ? field('NUMPAGES') : t ? `<w:r><w:t xml:space="preserve">${esc(clean(t))}</w:t></w:r>` : ''
+      ).join('');
+    const hfXml = (tag, style, slots) => {
+      const last = slots[2].trim() ? 2 : slots[1].trim() ? 1 : 0;
+      const runs = slots.slice(0, last + 1).map((s, i) => (i ? '<w:r><w:tab/></w:r>' : '') + hfRuns(s)).join('');
+      return (
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${tag} ${W_NS}><w:p><w:pPr><w:pStyle w:val="${style}"/>` +
+        `<w:tabs><w:tab w:val="center" w:pos="${twip(g.cw / 2)}"/><w:tab w:val="right" w:pos="${twip(g.cw)}"/></w:tabs></w:pPr>${runs}</w:p></w:${tag}>`
+      );
+    };
+    const hfParts = [];
+    if (hfUsed(hf.header)) hfParts.push({ kind: 'header', ref: 'default', file: 'header1.xml', data: hfXml('hdr', 'Header', hf.header) });
+    if (hfUsed(hf.footer)) hfParts.push({ kind: 'footer', ref: 'default', file: 'footer1.xml', data: hfXml('ftr', 'Footer', hf.footer) });
+    const titlePg = hf.firstPage && hfParts.length > 0;
+    if (titlePg) {
+      hfParts.push({ kind: 'header', ref: 'first', file: 'header2.xml', data: hfXml('hdr', 'Header', ['', '', '']) });
+      hfParts.push({ kind: 'footer', ref: 'first', file: 'footer2.xml', data: hfXml('ftr', 'Footer', ['', '', '']) });
+    }
+    hfParts.forEach((p, i) => (p.rId = 'rIdHf' + (i + 1)));
+
     // ---- Bölüm (sayfa) ayarları ----
     const m = g.m;
-    const footer = state.pageNumbers;
     const sectPr =
       '<w:sectPr>' +
-      (footer ? '<w:footerReference w:type="default" r:id="rIdFooter1"/>' : '') +
+      hfParts.map((p) => `<w:${p.kind}Reference w:type="${p.ref}" r:id="${p.rId}"/>`).join('') +
       `<w:pgSz w:w="${twip(g.PW)}" w:h="${twip(g.PH)}"${state.page.orient === 'landscape' ? ' w:orient="landscape"' : ''}/>` +
-      `<w:pgMar w:top="${twip(m.t)}" w:right="${twip(m.r)}" w:bottom="${twip(m.b)}" w:left="${twip(m.l)}" w:header="709" w:footer="${twip(app.FOOTER_DIST)}" w:gutter="0"/>` +
+      `<w:pgMar w:top="${twip(m.t)}" w:right="${twip(m.r)}" w:bottom="${twip(m.b)}" w:left="${twip(m.l)}" w:header="${twip(app.HEADER_DIST)}" w:footer="${twip(app.FOOTER_DIST)}" w:gutter="0"/>` +
       '<w:cols w:space="708"/>' +
+      (titlePg ? '<w:titlePg/>' : '') +
       '</w:sectPr>';
 
     const documentXml =
@@ -455,20 +539,22 @@
 
     const heading = (id, name, lvl, hp, before, after) =>
       `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>` +
-      `<w:pPr><w:spacing w:before="${before}" w:after="${after}"/><w:outlineLvl w:val="${lvl}"/></w:pPr><w:rPr><w:b/><w:bCs/><w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/></w:rPr></w:style>`;
+      `<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="${before}" w:after="${after}"/><w:outlineLvl w:val="${lvl}"/></w:pPr><w:rPr><w:b/><w:bCs/><w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/></w:rPr></w:style>`;
     const stylesXml =
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
       '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/>' +
       '<w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="tr-TR" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>' +
-      '<w:pPrDefault><w:pPr><w:widowControl w:val="0"/><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
+      // Dul/öksüz satır denetimi açık: editörün sayfalaması da aynı kuralı uygular (core.js: boundaryCut)
+      '<w:pPrDefault><w:pPr><w:widowControl/><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
       '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +
       '<w:style w:type="character" w:default="1" w:styleId="DefaultParagraphFont"><w:name w:val="Default Paragraph Font"/><w:uiPriority w:val="1"/><w:semiHidden/><w:unhideWhenUsed/></w:style>' +
       heading('Heading1', 'heading 1', 0, 36, 240, 120) +
       heading('Heading2', 'heading 2', 1, 28, 200, 100) +
       heading('Heading3', 'heading 3', 2, 24, 160, 80) +
       '<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="35"/><w:unhideWhenUsed/><w:qFormat/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>' +
-      '<w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="99"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="99"/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="99"/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>' +
       '</w:styles>';
 
     const settingsXml =
@@ -478,14 +564,6 @@
       '<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>' +
       '</w:settings>';
 
-    const footerXml =
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      '<w:p><w:pPr><w:pStyle w:val="Footer"/></w:pPr>' +
-      '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>' +
-      '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>' +
-      '</w:p></w:ftr>';
-
     const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
     const docRels =
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -493,7 +571,7 @@
       `<Relationship Id="rIdStyles" Type="${REL}/styles" Target="styles.xml"/>` +
       `<Relationship Id="rIdNumbering" Type="${REL}/numbering" Target="numbering.xml"/>` +
       `<Relationship Id="rIdSettings" Type="${REL}/settings" Target="settings.xml"/>` +
-      (footer ? `<Relationship Id="rIdFooter1" Type="${REL}/footer" Target="footer1.xml"/>` : '') +
+      hfParts.map((p) => `<Relationship Id="${p.rId}" Type="${REL}/${p.kind}" Target="${p.file}"/>`).join('') +
       mediaFiles.map((f) => `<Relationship Id="${f.rId}" Type="${REL}/image" Target="${f.name.slice(5)}"/>`).join('') +
       '</Relationships>';
 
@@ -509,7 +587,7 @@
       `<Override PartName="/word/styles.xml" ContentType="${OD}.wordprocessingml.styles+xml"/>` +
       `<Override PartName="/word/numbering.xml" ContentType="${OD}.wordprocessingml.numbering+xml"/>` +
       `<Override PartName="/word/settings.xml" ContentType="${OD}.wordprocessingml.settings+xml"/>` +
-      (footer ? `<Override PartName="/word/footer1.xml" ContentType="${OD}.wordprocessingml.footer+xml"/>` : '') +
+      hfParts.map((p) => `<Override PartName="/word/${p.file}" ContentType="${OD}.wordprocessingml.${p.kind}+xml"/>`).join('') +
       '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
       `<Override PartName="/docProps/app.xml" ContentType="${OD}.extended-properties+xml"/>` +
       '</Types>';
@@ -542,7 +620,7 @@
       { name: 'word/numbering.xml', data: numbering.xml() },
       { name: 'word/settings.xml', data: settingsXml },
       { name: 'word/_rels/document.xml.rels', data: docRels },
-      ...(footer ? [{ name: 'word/footer1.xml', data: footerXml }] : []),
+      ...hfParts.map((p) => ({ name: 'word/' + p.file, data: p.data })),
       ...mediaFiles.map((f) => ({ name: f.name, data: f.data })),
     ];
     return SS.makeZip(files, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');

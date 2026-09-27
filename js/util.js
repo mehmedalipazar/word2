@@ -27,6 +27,13 @@
     italic: '<path d="M19 4h-9M14 20H5M15 4 9 20"/>',
     underline: '<path d="M6 4v6a6 6 0 0 0 12 0V4"/><path d="M4 20h16"/>',
     strike: '<path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><path d="M4 12h16"/>',
+    subscript: '<path d="m4 5 8 8M12 5l-8 8"/><path d="M20 19h-4c0-1.5.44-2 1.5-2.5S20 15.33 20 14c0-.47-.17-.93-.48-1.29a2.11 2.11 0 0 0-2.62-.44c-.42.24-.74.62-.9 1.07"/>',
+    superscript: '<path d="m4 19 8-8M12 19l-8-8"/><path d="M20 12h-4c0-1.5.44-2 1.5-2.5S20 8.33 20 7c0-.47-.17-.93-.48-1.29a2.11 2.11 0 0 0-2.62-.44c-.42.24-.74.62-.9 1.07"/>',
+    search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>',
+    chevUp: '<path d="m18 15-6-6-6 6"/>',
+    chevDown: '<path d="m6 9 6 6 6-6"/>',
+    close: '<path d="M18 6 6 18M6 6l12 12"/>',
+    paragraph: '<path d="M13 4v16M17 4v16M19 4H9.5a4.5 4.5 0 0 0 0 9H13"/>',
     highlight: '<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',
     eraser: '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
     alignLeft: '<path d="M21 6H3M15 12H3M17 18H3"/>',
@@ -119,6 +126,7 @@
     get: (k) => tx('readonly', (s) => s.get(k)),
     set: (k, v) => tx('readwrite', (s) => s.put(v, k)),
     del: (k) => tx('readwrite', (s) => s.delete(k)),
+    keys: () => tx('readonly', (s) => s.getAllKeys()),
   };
 
   // ---------- Dosya yardımcıları ----------
@@ -156,6 +164,26 @@
   };
 
   SS.safeFileName = (s) => (s || 'belge').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'belge';
+
+  // ---------- Yazı tipinin "tek satır" yüksekliği ----------
+  // Word'ün tek satır aralığı yazı tipinin doğal satır yüksekliğidir (üst + alt + satır arası boşluğu):
+  // Calibri'de puntonun 1,22 katı, Times New Roman'da 1,15 katı. Tarayıcıdaki line-height: normal aynı
+  // ölçüleri kullanır; bu katsayıyı yazı tipi başına bir kez ölçeriz. "1,5 satır" = 1,5 × bu katsayı.
+  const lineFactors = new Map();
+  SS.lineFactor = (family) => {
+    const key = String(family || 'Calibri').toLowerCase();
+    if (lineFactors.has(key)) return lineFactors.get(key);
+    const d = document.createElement('div');
+    d.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;line-height:normal;font-size:1000px';
+    d.style.fontFamily = `"${String(family || 'Calibri').replace(/["']/g, '')}", Calibri, Carlito, sans-serif`; // editördeki yedek sırası
+    d.textContent = 'Hg';
+    document.body.appendChild(d);
+    const f = d.getBoundingClientRect().height / 1000;
+    d.remove();
+    const v = f > 0.8 && f < 2 ? Math.round(f * 10000) / 10000 : 1.17;
+    lineFactors.set(key, v);
+    return v;
+  };
 
   // ---------- Görsel hazırlama ----------
   // Word ve PDF'te sorunsuz görünmesi için: yalnızca PNG/JPEG tutulur, telefon fotoğraflarındaki

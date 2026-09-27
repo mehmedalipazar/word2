@@ -16,9 +16,26 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 
 ## Özellikler
 
-- A4/A5/A3/Letter, dikey/yatay, kenar boşlukları, sayfa numarası
-- Metin: yazı tipi, boyut, kalın/italik/altı çizili/üstü çizili, renk, vurgu, hizalama, satır aralığı, başlıklar, listeler
+- A4/A5/A3/Letter, dikey/yatay, kenar boşlukları
+- **Üst ve alt bilgi** (Sayfa yapısı): her bantta sol/orta/sağ yuva; `{sayfa}` ve `{toplam}` alanlarıyla "Sayfa 1 / 5";
+  "İlk sayfada gösterme" (kapak sayfası)
+- Metin: yazı tipi, boyut, kalın/italik/altı çizili/üstü çizili, üst/alt simge, renk, vurgu, hizalama, başlıklar
+- **Satır aralığı Word'deki gibi satır cinsinden** (1,0 / 1,08 / 1,15 / 1,5 / 2,0…; "1,5" Word'ün 1,5 satırıdır);
+  varsayılan Word'ün Normal stili gibi 1,08 satır + 8 nk paragraf sonrası
+- **Paragraf penceresi** (¶ düğmesi): sol/sağ girinti, ilk satır ya da asılı girinti, önce/sonra aralığı, satır aralığı
+  (tek, 1,5, çift, birden çok, en az); satır aralığı kutusunda "Paragraftan önce/sonra boşluk ekle/kaldır"
+- **Cetvel**: imlecin paragrafının girintileri; ilk satır, asılı, sol ve sağ girinti işaretleri sürüklenir
+  (0,25 cm'ye yapışır, Alt ile serbest)
+- Sekme durakları Word'deki gibi her 1,27 cm'de
+- Listeler Word'ün asılı girintisiyle (işaret 0,63 cm, metin 1,27 cm; alt düzeyler 1,27 cm içeride, •/o/▪ ve 1./a./i.);
+  maddenin başında Backspace önce işareti kaldırır (metin yerinde kalır), numara sonraki maddelerde sürer
+- Paragraf başında Backspace: önce ilk satır girintisini, sonra sol girintiyi azaltır; sayfa sonundan sonra sayfa sonunu siler
+- **Sayfalama Word gibi**: dul/öksüz satır denetimi (paragrafın ilk ya da son satırı sayfada tek kalmaz), başlıklar
+  bölünmez ve sonraki paragrafla aynı sayfada kalır. Uzun belgede yazarken arka planda güncellenir.
+- **Bul ve Değiştir** (Ctrl+F / Ctrl+H): büyük/küçük harf, tam sözcük; Türkçe I/ı–İ/i kuralı; "Tümünü değiştir" şekil yazılarını da kapsar ve tek adımda geri alınır
 - Resim: dosya seç / sürükle-bırak / yapıştır; taşı, boyutlandır (köşeler oranı korur, Shift serbest), döndür (Shift: 15°)
+- Resmi başka sayfaya taşıma: sürüklerken pencerenin üst/alt kenarında belge kayar; kes → metinde bir yere tıkla → yapıştır
+  resmi imlecin sayfasına ve satırına koyar (imleç yoksa görünen sayfaya); bağlam çubuğunda **Sayfa** alanı
 - Metin kaydırma: **Kare**, **Üst-Alt**, **Metnin önünde**, **Metnin arkasında**
 - Akıllı kılavuzlar: sayfa kenarına, kenar boşluğuna, sayfa ortasına ve diğer resimlere yapışma (Alt ile geçici kapatılır); isteğe bağlı 0,5 cm ızgara
 - Hizala/dağıt, öne/arkaya, kilitle, çoğalt, cm cinsinden X/Y/Genişlik/Yükseklik/Açı
@@ -26,13 +43,17 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   kendiliğinden güncellenir (Şekil, Harita, Fotoğraf, Grafik… her etiket ayrı sayılır); resmin altında ya da üstünde
 - **Sayfa sonu** (Ctrl+Enter): sonraki metin yeni sayfadan başlar
 - Tek geri alma geçmişi (metin + resim işlemleri birlikte)
-- Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt
-- **Word belgesi açma (.docx)**: metin, başlıklar (numaralarıyla), biçimler, listeler, satır aralıkları,
-  sayfa ayarları, sayfa numarası, resimler (kırpma/döndürme/metin kaydırma dahil). Resmin hemen altındaki
-  "Şekil 3. …" paragrafı ya da resimle gruplanmış yazı kutusu, o resmin şekil yazısı olarak gelir.
-  "Aç" düğmesiyle ya da dosyayı sayfaya sürükleyerek.
-- **Word'e aktar (.docx)**: resimler sayfaya göre mutlak konumla yazılır, Word'de de aynı yerde durur;
-  şekil yazıları Word'ün "Resim Yazısı" stiliyle ve otomatik numara alanıyla yazılır (Word'de "Şekiller Tablosu" eklenebilir)
+- Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
+  son yazılanlar da korunur; kaydedilmemiş değişiklik varken kapatma/yenilemede tarayıcı uyarır. Kapanan sekmenin
+  belgesi, sonra açılan yeni sekmede geri gelir.
+- **Word belgesi açma (.docx)**: metin, başlıklar (numaralarıyla), biçimler, listeler (düzeyleriyle; araya paragraf girse
+  de numara sürer), satır aralıkları, girintiler, sayfa ayarları, üst/alt bilgi (metin ve sayfa numarası), resimler
+  (kırpma/döndürme/metin kaydırma dahil). Resmin hemen altındaki "Şekil 3. …" paragrafı ya da resimle gruplanmış
+  yazı kutusu, o resmin şekil yazısı olarak gelir. "Aç" düğmesiyle ya da dosyayı sayfaya sürükleyerek.
+- **Word'e aktar (.docx)**: resimler sayfaya göre mutlak konumla yazılır; çapa, resmin sayfasında başlayan bir
+  paragrafa konur, böylece Word'de de aynı sayfada ve yerde durur. Şekil yazıları Word'ün "Resim Yazısı" stiliyle ve
+  otomatik numara alanıyla yazılır (Word'de "Şekiller Tablosu" eklenebilir). Satır aralığı Word'ün satır birimiyle,
+  dul/öksüz satır denetimi ve başlıklarda "sonrakiyle birlikte tut" açık yazılır.
 - **PDF / Yazdır**: ekrandaki sayfaların birebir aynısı ("PDF olarak kaydet" seçin)
 
 ## Kısayollar
@@ -41,19 +62,33 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 | --- | --- |
 | Ctrl+Z / Ctrl+Y | Geri al / Yinele |
 | Ctrl+S / Ctrl+O / Ctrl+P | Kaydet / Aç / Yazdır |
+| Ctrl+F / Ctrl+H | Bul / Bul ve Değiştir (Enter: sonraki, Shift+Enter: önceki, Esc: kapat) |
+| Ctrl+B / Ctrl+I / Ctrl+U | Kalın / italik / altı çizili |
+| Ctrl+L / Ctrl+E / Ctrl+R / Ctrl+J | Sola / ortala / sağa / iki yana (resim seçiliyse resmi sola / ortaya / sağa hizalar) |
+| Ctrl+Shift+> / Ctrl+Shift+< | Yazıyı bir boyut büyüt / küçült |
+| Ctrl+] / Ctrl+[ | Yazıyı 1 nk büyüt / küçült |
+| Ctrl+= / Ctrl+Shift+= | Alt simge / üst simge |
+| Ctrl+Boşluk | Karakter biçimini temizle |
+| Ctrl+Alt+1 / 2 / 3 | Başlık 1 / 2 / 3 |
+| Ctrl+1 / Ctrl+5 / Ctrl+2 | Satır aralığı tek / 1,5 / çift |
+| Ctrl+M / Ctrl+Shift+M | Girintiyi artır / azalt |
+| Ctrl+Shift+L | Madde işaretleri |
+| Tab / Shift+Tab | Sekme; liste maddesinde alt düzeye in / çık |
 | Oklar (Shift: 10 px) | Seçili resmi ince ayarla kaydır |
 | Delete, Ctrl+D, Esc | Sil, çoğalt, seçimi bırak |
 | Enter / F2 / çift tık | Seçili resmin şekil yazısını yaz/düzenle (Enter: bitir, Esc: vazgeç) |
-| Ctrl+Enter | Sayfa sonu |
+| Ctrl+Enter | Sayfa sonu (sonraki paragrafın başında Backspace siler) |
 | Alt+tık | Metnin arkasındaki resmi yazının üstünden seç |
-| Ctrl+tekerlek, Ctrl + / − / 0 | Yakınlaştırma |
+| Ctrl+tekerlek, Ctrl+Num+ / Ctrl+− / Ctrl+0 | Yakınlaştırma |
 
 ## Dosyalar
 
 | Dosya | İçerik |
 | --- | --- |
 | `js/core.js` | Durum, sayfa geometrisi, metin akış şeritleri, geri alma, dosya biçimi |
-| `js/text.js` | Biçimlendirme komutları, Word/web yapıştırma temizliği |
+| `js/text.js` | Biçimlendirme komutları, paragraf penceresi, Word/web yapıştırma temizliği |
+| `js/find.js` | Bul ve değiştir |
+| `js/ruler.js` | Cetvel (girinti işaretleri) |
 | `js/objects.js` | Resim seçimi, sürükleme, boyut/döndürme, kılavuzlar, hizalama, pano |
 | `js/docx.js` | Word (.docx) dışa aktarma |
 | `js/docximport.js` | Word (.docx) içe aktarma |
@@ -62,8 +97,13 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 
 ## Bilinen sınırlamalar
 
-- Tablo, dipnot, içindekiler, üst bilgi yok. Word'den açılan tablolar düz metne (satır başına bir paragraf) dönüşür;
+- Tablo, dipnot, içindekiler yok. Word'den açılan tablolar düz metne (satır başına bir paragraf) dönüşür;
   dipnotlar, grafikler ve EMF/WMF biçimli resimler alınamaz (açılışta kaç tanesinin atlandığı gösterilir).
+- Üst/alt bilgi tek satır düz metindir (biçim, resim, tablo, tek/çift sayfa ayrımı yok); Word'den yalnızca ilk dolu
+  satırı alınır, kalanı açılışta bildirilir.
+- Cetvelde sekme durağı yoktur. Word'deki özel sekme durakları alınmaz (varsayılan 1,27 cm durakları geçerlidir).
+  Word'ün "Tam" satır aralığı "En az" olarak alınır.
+- Çok düzeyli listelerde numaralar düzey başına ayrıdır (1., a., i.); Word'deki "1.1." gibi birleşik numaralar yoktur.
 - Eski `.doc` biçimi açılamaz; Word'de ".docx" olarak kaydedin.
 - Şekil numaraları düz sayıdır (1, 2, 3…); Word'deki "Şekil 2.3" gibi bölüm numaralı yazılar düz numaraya döner.
 - Word/LibreOffice satırları tarayıcıdan biraz farklı kırabilir; uzun belgelerde sayfa sonları birkaç satır kayabilir (resimler yerinde kalır).

@@ -191,12 +191,16 @@
     const nums = new Map();
     for (const a of all(doc, W, 'abstractNum')) {
       const lv = new Map();
-      for (const l of kids(a, W, 'lvl'))
+      for (const l of kids(a, W, 'lvl')) {
+        const ind = kid(kid(l, W, 'pPr'), W, 'ind');
+        const left = ind && (wa(ind, 'left') ?? wa(ind, 'start'));
         lv.set(+wa(l, 'ilvl'), {
           fmt: wa(kid(l, W, 'numFmt'), 'val') || 'decimal',
           text: wa(kid(l, W, 'lvlText'), 'val') || '',
           start: +(wa(kid(l, W, 'start'), 'val') || 1),
+          left: left !== null && left !== undefined ? +left / 20 : null, // pt
         });
+      }
       abs.set(wa(a, 'abstractNumId'), lv);
     }
     for (const n of all(doc, W, 'num')) {
@@ -213,6 +217,15 @@
       fmt(numId, ilvl) {
         const lv = abs.get(nums.get(numId)?.abs);
         return lv ? (lv.get(ilvl) || lv.get(0) || { fmt: 'bullet' }).fmt : null;
+      },
+      // Düzeyin sol girintisi (pt) ve son next() çağrısındaki sayaç değeri
+      left(numId, ilvl) {
+        const lv = abs.get(nums.get(numId)?.abs);
+        return lv && lv.get(ilvl) ? lv.get(ilvl).left : null;
+      },
+      count(numId, ilvl) {
+        const c = counters.get(nums.get(numId)?.abs);
+        return (c && c[ilvl]) || 1;
       },
       next(numId, ilvl) {
         const n = nums.get(numId);
@@ -299,6 +312,8 @@
         case 'ind': {
           const l = wa(c, 'left') ?? wa(c, 'start');
           if (l !== null) o.left = +l / 20;
+          const rt = wa(c, 'right') ?? wa(c, 'end');
+          if (rt !== null) o.right = +rt / 20;
           const fl = wa(c, 'firstLine');
           const hg = wa(c, 'hanging');
           if (fl !== null) o.first = +fl / 20;
@@ -320,15 +335,14 @@
     return o;
   }
 
-  // Editörün kendi varsayılanları (bunlardan farklı olanlar satır içi stil olarak yazılır)
+  // Editörün kendi varsayılanları (bunlardan farklı olanlar satır içi stil olarak yazılır).
+  // lh: css .editor line-height (Word'ün 1,08 satırı, Calibri); satır aralığı için core.js: lineSpacing.
   const TAG = {
-    p: { font: 'Calibri', sz: 11, b: false, mt: 0, mb: 8, lh: 1.35 },
-    h1: { font: 'Calibri', sz: 18, b: true, mt: 12, mb: 6, lh: 1.25 },
-    h2: { font: 'Calibri', sz: 14, b: true, mt: 10, mb: 5, lh: 1.25 },
-    h3: { font: 'Calibri', sz: 12, b: true, mt: 8, mb: 4, lh: 1.25 },
+    p: { font: 'Calibri', sz: 11, b: false, mt: 0, mb: 8, lh: 1.3177 },
+    h1: { font: 'Calibri', sz: 18, b: true, mt: 12, mb: 6, lh: 1.3177 },
+    h2: { font: 'Calibri', sz: 14, b: true, mt: 10, mb: 5, lh: 1.3177 },
+    h3: { font: 'Calibri', sz: 12, b: true, mt: 8, mb: 4, lh: 1.3177 },
   };
-  // Word'ün "tek satır" yüksekliği yazı tipine göre değişir (yazı boyutunun katı)
-  const SINGLE = { calibri: 1.22, 'calibri light': 1.22, aptos: 1.2, cambria: 1.17, 'times new roman': 1.15, arial: 1.15, georgia: 1.14, verdana: 1.22, tahoma: 1.21, 'segoe ui': 1.33 };
 
   const CAPTION_RE = /^\s*(Şekil|Sekil|Figure|Fig\.?|Harita|Fotoğraf|Foto|Resim|Grafik|Tablo|Table|Çizelge|Levha)\s*[-–]?\s*([0-9]+(?:[.\-–][0-9]+)*)\s*[.:\-–)]?\s*/i;
   const normLabel = (l) => {
@@ -374,13 +388,17 @@
       const ilvl = pp.ilvl || 0;
       numText = ctx.numbering.next(pp.numId, ilvl);
       const fmt = ctx.numbering.fmt(pp.numId, ilvl);
-      if (fmt && fmt !== 'none') list = { ordered: fmt !== 'bullet', ilvl };
+      // indent: görsel düzey için (renderBlocks); value: numaralı listenin bu maddedeki sayacı (start için)
+      const lvLeft = ctx.numbering.left(pp.numId, ilvl);
+      if (fmt && fmt !== 'none')
+        list = { ordered: fmt !== 'bullet', ilvl, indent: pp.left !== undefined ? pp.left : lvLeft, value: ctx.numbering.count(pp.numId, ilvl) };
     }
     const tag = heading ? 'h' + Math.min(heading, 3) : 'p';
     return { pp, rb: { ...base.rb }, tag, list: heading ? null : list, numText: heading ? numText : '', caption: base.caption, sectPr: kid(pPr, W, 'sectPr') };
   }
 
-  function paraCSS(pp, tag, rb, inList) {
+  // lineFont: satır yüksekliğini belirleyen yazı tipi (paragraftaki en büyük puntolu metnin)
+  function paraCSS(pp, tag, lineFont, inList) {
     const d = TAG[tag];
     const st = [];
     const jc = { center: 'center', right: 'right', end: 'right', both: 'justify', distribute: 'justify' }[pp.jc];
@@ -391,15 +409,34 @@
       if (Math.abs(mt - d.mt) > 0.5) st.push(`margin-top: ${+mt.toFixed(1)}pt`);
       if (Math.abs(mb - d.mb) > 0.5) st.push(`margin-bottom: ${+mb.toFixed(1)}pt`);
       if (pp.left > 0.5) st.push(`margin-left: ${+pp.left.toFixed(1)}pt`);
+      if (pp.right > 0.5) st.push(`margin-right: ${+pp.right.toFixed(1)}pt`);
       if (pp.first && Math.abs(pp.first) > 0.5) st.push(`text-indent: ${+pp.first.toFixed(1)}pt`);
     }
-    if (pp.line) {
-      if (pp.lineRule === 'auto') {
-        const r = +((pp.line / 240) * (SINGLE[(rb.font || '').toLowerCase()] || 1.17)).toFixed(2);
-        if (Math.abs(r - d.lh) > 0.005) st.push(`line-height: ${r}`); // küçük farklar sayfalarda birikir
-      } else st.push(`line-height: ${+(pp.line / 20).toFixed(1)}pt`);
-    }
+    // Satır aralığı hiçbir yerde belirtilmemişse Word'de tek satırdır
+    if (!pp.line || pp.lineRule === 'auto') {
+      const r = +(((pp.line || 240) / 240) * SS.lineFactor(lineFont)).toFixed(4);
+      if (Math.abs(r - d.lh) > 0.002) st.push(`line-height: ${r}`); // küçük farklar sayfalarda birikir
+    } else st.push(`line-height: ${+(pp.line / 20).toFixed(1)}pt`);
     return st.join('; ');
+  }
+
+  function lineFontOf(b, base) {
+    const acc = new Map();
+    let max = 0;
+    for (const x of b.parts) {
+      if (x.t !== 'text' || !x.text.trim()) continue;
+      const sz = x.props.sz || base.sz;
+      const f = x.props.font || base.font;
+      if (sz > max + 0.01) {
+        max = sz;
+        acc.clear();
+      }
+      if (sz > max - 0.01) acc.set(f, (acc.get(f) || 0) + x.text.length);
+    }
+    let best = base.font;
+    let most = 0;
+    acc.forEach((v, f) => v > most && ((most = v), (best = f)));
+    return best;
   }
 
   // ---------- Paragraf içeriği ----------
@@ -767,6 +804,8 @@
 
   function runHTML(text, p, base) {
     let h = esc(text);
+    // Üst/alt simge en içte: dıştaki punto span'ı <sup>'nun küçültmesini ezmesin (css: .editor sup)
+    if (p.va) h = `<${p.va}>${h}</${p.va}>`;
     const st = [];
     if (p.font && p.font.toLowerCase() !== base.font.toLowerCase()) st.push(`font-family: '${p.font.replace(/['"]/g, '')}', Calibri, sans-serif`);
     if (p.sz && Math.abs(p.sz - base.sz) > 0.01) st.push(`font-size: ${p.sz}pt`);
@@ -778,15 +817,43 @@
     if (p.i) h = `<i>${h}</i>`;
     if (p.u) h = `<u>${h}</u>`;
     if (p.s) h = `<s>${h}</s>`;
-    if (p.va) h = `<${p.va}>${h}</${p.va}>`;
     return h;
   }
 
   function renderBlocks(blocks) {
+    // Görsel liste düzeyi = art arda gelen liste paragraflarında girintinin sırası. Word'ün "Liste Madde
+    // İşareti 2" gibi tek düzeyli ama daha içeride duran listeleri de böylece alt düzey olur; girinti
+    // bilinmiyorsa ilvl kullanılır.
+    const key = (b) => Math.round(b.list.indent ?? b.list.ilvl * 36) + b.list.ilvl / 100;
+    let run = [];
+    const flush = () => {
+      const keys = [...new Set(run.map(key))].sort((a, b) => a - b);
+      run.forEach((b) => (b.list.level = keys.indexOf(key(b))));
+      run = [];
+    };
+    for (const b of blocks) {
+      if (b.type === 'p' && b.list) run.push(b);
+      else flush();
+    }
+    flush();
+
     const root = document.createElement('div');
     let stack = [];
     const fill = (el, b) => {
-      const base = TAG[b.tag] || TAG.p;
+      const tagBase = TAG[b.tag] || TAG.p;
+      const rb = b.rb || tagBase;
+      // Paragraf stilinin yazı tipi ve boyutu bloğun kendisine yazılır (Word'deki paragraf işareti gibi):
+      // aynı biçimdeki metin span'sız kalır, boş satırlar ve liste işaretleri de doğru boyutta olur
+      const base = { ...tagBase };
+      const st = [];
+      if (rb.font && rb.font.toLowerCase() !== tagBase.font.toLowerCase()) {
+        st.push(`font-family: '${rb.font.replace(/['"]/g, '')}', Calibri, sans-serif`);
+        base.font = rb.font;
+      }
+      if (rb.sz && Math.abs(rb.sz - tagBase.sz) > 0.01) {
+        st.push(`font-size: ${rb.sz}pt`);
+        base.sz = rb.sz;
+      }
       let html = '';
       for (const x of b.parts) {
         if (x.t === 'text') html += runHTML(x.text, x.props, base);
@@ -794,8 +861,9 @@
         else if (x.t === 'ph') html += `<span class="ph" data-ph="${x.id}"></span>`;
       }
       el.innerHTML = html || '<br>';
-      const css = paraCSS(b.pp || {}, b.tag, b.rb || base, !!b.list);
-      if (css) el.setAttribute('style', css);
+      const css = paraCSS(b.pp || {}, b.tag, lineFontOf(b, base), !!b.list);
+      if (css) st.push(css);
+      if (st.length) el.setAttribute('style', st.join('; '));
     };
     for (const b of blocks) {
       if (b.type === 'pb') {
@@ -813,11 +881,13 @@
         root.appendChild(el);
         continue;
       }
-      const lvl = Math.min(b.list.ilvl, 8);
+      const lvl = Math.min(b.list.level ?? b.list.ilvl, 8);
       while (stack.length > lvl + 1) stack.pop();
       if (stack.length === lvl + 1 && stack[lvl].ordered !== b.list.ordered) stack.pop();
       while (stack.length < lvl + 1) {
         const L = document.createElement(b.list.ordered ? 'ol' : 'ul');
+        // Araya paragraf girip devam eden Word listesi kaldığı numaradan sürer
+        if (b.list.ordered && stack.length === lvl && b.list.value > 1) L.setAttribute('start', b.list.value);
         const top = stack[stack.length - 1];
         (top ? top.lastLi || top.el : root).appendChild(L);
         stack.push({ el: L, ordered: b.list.ordered, lastLi: null });
@@ -845,15 +915,103 @@
     return { size, orient, custom: [+a.toFixed(2), +b.toFixed(2)], margins: { t: m('top'), r: m('right'), b: m('bottom'), l: m('left') } };
   }
 
-  async function hasPageNumbers(sect, ctx) {
-    for (const ref of [...kids(sect, W, 'footerReference'), ...kids(sect, W, 'headerReference')]) {
-      const rel = ctx.rels.get(ref.getAttributeNS(NS.r, 'id'));
-      const x = rel && (await ctx.pkg.xml(rel.target));
-      if (!x) continue;
-      const instr = all(x, W, 'instrText').map((e) => e.textContent).join(' ') + ' ' + all(x, W, 'fldSimple').map((e) => wa(e, 'instr')).join(' ');
-      if (/\bPAGE\b/.test(instr)) return true;
+  // ---------- Üst/alt bilgi ----------
+  // Varsayılan üst/alt bilginin ilk dolu paragrafı sol/orta/sağ yuvalara bölünür (sekmeye ya da hizalamaya
+  // göre); PAGE / NUMPAGES alanları {sayfa} / {toplam} olur. Alınamayanlar (resim, tablo, ek paragraf,
+  // ilk sayfaya özel içerik) sayılır ve açılışta bildirilir.
+  const pageToken = (instr) => (/\bPAGE\b/.test(instr) ? '{sayfa}' : /\b(NUMPAGES|SECTIONPAGES)\b/.test(instr) ? '{toplam}' : null);
+
+  function hfSlots(x) {
+    const root = x.documentElement;
+    let slots = null;
+    let lost = kids(root, W, 'tbl').length;
+    for (const p of kids(root, W, 'p')) {
+      const segs = [''];
+      let fld = null; // karmaşık alan: { instr, sep, tok }
+      const put = (s) => (segs[segs.length - 1] += s);
+      const run = (r) => {
+        for (const c of r.children) {
+          if (c.namespaceURI !== W) {
+            if (c.localName === 'AlternateContent') lost++;
+            continue;
+          }
+          switch (c.localName) {
+            case 't': if (!fld || (fld.sep && !fld.tok)) put(c.textContent); break;
+            case 'tab': segs.push(''); break;
+            case 'ptab': {
+              const at = { left: 0, center: 1, right: 2 }[wa(c, 'alignment')] ?? segs.length;
+              while (segs.length - 1 < at) segs.push('');
+              break;
+            }
+            case 'instrText': if (fld) fld.instr += c.textContent; break;
+            case 'fldChar': {
+              const t = wa(c, 'fldCharType');
+              if (t === 'begin') fld = { instr: '', sep: false, tok: null };
+              else if (t === 'separate' && fld) {
+                fld.sep = true;
+                fld.tok = pageToken(fld.instr);
+                if (fld.tok) put(fld.tok);
+              } else if (t === 'end') {
+                if (fld && !fld.sep && pageToken(fld.instr)) put(pageToken(fld.instr));
+                fld = null;
+              }
+              break;
+            }
+            case 'drawing': case 'pict': case 'object': lost++; break;
+            default:
+          }
+        }
+      };
+      const walk = (el) => {
+        for (const c of el.children) {
+          if (c.namespaceURI === NS.mc && c.localName === 'AlternateContent') lost++;
+          if (c.namespaceURI !== W) continue;
+          if (c.localName === 'r') run(c);
+          else if (c.localName === 'fldSimple') {
+            const t = pageToken(wa(c, 'instr') || '');
+            if (t) put(t);
+            else walk(c);
+          } else if (/^(hyperlink|smartTag|ins|customXml)$/.test(c.localName)) walk(c);
+          else if (c.localName === 'sdt') walk(kid(c, W, 'sdtContent') || c);
+        }
+      };
+      walk(p);
+      if (!segs.join('').trim()) continue;
+      if (slots) {
+        lost++; // yalnızca ilk dolu paragraf alınır
+        continue;
+      }
+      if (segs.length === 1) {
+        const jc = wa(kid(kid(p, W, 'pPr'), W, 'jc'), 'val') || '';
+        slots = ['', '', ''];
+        slots[jc === 'center' ? 1 : /right|end/.test(jc) ? 2 : 0] = segs[0];
+      } else slots = [segs[0], segs[1], segs.slice(2).join(' ')];
     }
-    return false;
+    return { slots: slots && slots.map((s) => s.replace(/\s+/g, ' ').trim()), lost };
+  }
+
+  async function readHF(sect, ctx) {
+    const hf = app.emptyHF();
+    const tp = kid(sect, W, 'titlePg');
+    hf.firstPage = !!tp && onOff(tp);
+    let lost = 0;
+    const part = async (tag, type) => {
+      const ref = kids(sect, W, tag).find((r) => (wa(r, 'type') || 'default') === type);
+      const rel = ref && ctx.rels.get(ref.getAttributeNS(NS.r, 'id'));
+      return rel ? ctx.pkg.xml(rel.target) : null;
+    };
+    for (const [tag, band] of [['headerReference', 'header'], ['footerReference', 'footer']]) {
+      const x = await part(tag, 'default');
+      if (x) {
+        const r = hfSlots(x);
+        if (r.slots) hf[band] = r.slots;
+        lost += r.lost;
+      }
+      // İlk sayfaya özel içerik alınamaz: kapakta üst/alt bilgi gösterilmez
+      const first = hf.firstPage && (await part(tag, 'first'));
+      if (first && hfSlots(first).slots) lost++;
+    }
+    return { hf, lost };
   }
 
   // ---------- Resimler ----------
@@ -989,10 +1147,20 @@
     const order = ctx.images.filter((r) => r.asset).sort((a, b) => (a.inline ? 0 : 1) - (b.inline ? 0 : 1) || (a.relHeight || 0) - (b.relHeight || 0));
     const zOf = new Map(order.map((r, i) => [r.id, i + 1]));
     const blockSel = 'p,h1,h2,h3,li,div';
+    // Word'deki satır konumları dul/öksüz satır kuralıyla dizilmiş düzene göredir: ölçmeden önce yer
+    // tutucunun sayfasına (ve sonundaki sınıra) kadar sayfalamayı kesinleştir
+    const settle = (ph) => {
+      for (let i = 0; i < 4 && app.paginationPending(); i++) {
+        const p = app.pageAtY((ph.getBoundingClientRect().top - els.doc.getBoundingClientRect().top) / state.zoom);
+        app.paginateNow(p + 1);
+        if (app.pageAtY((ph.getBoundingClientRect().top - els.doc.getBoundingClientRect().top) / state.zoom) === p) break;
+      }
+    };
     for (const ph of [...els.editor.querySelectorAll('span.ph')]) {
       const recs = recsByPh.get(ph.dataset.ph) || [];
       const block = ph.parentElement.closest(blockSel) || els.editor;
       if (recs.length) {
+        settle(ph);
         const g = app.geom();
         const d = els.doc.getBoundingClientRect();
         const toDoc = (v, o) => (v - o) / state.zoom;
@@ -1059,14 +1227,16 @@
     const html = renderBlocks(blocks);
     const sect = kid(body, W, 'sectPr');
     const page = sect ? pageFromSect(sect) : app.defaultPage();
-    const pageNumbers = sect ? await hasPageNumbers(sect, ctx) : false;
+    const hfRes = sect ? await readHF(sect, ctx) : { hf: app.emptyHF(), lost: 0 };
+    ctx.report.hf = [...hfRes.hf.header, ...hfRes.hf.footer].some(Boolean);
+    ctx.report.hfLost = hfRes.lost;
     const assets = await loadAssets(ctx);
     let title = file.name.replace(/\.docx$/i, '');
     const core = await pkg.xml('docProps/core.xml');
     const t = core && core.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', 'title')[0];
     if (t && t.textContent.trim()) title = t.textContent.trim();
 
-    app.load({ app: 'SerbestSayfa', title, page, pageNumbers, html, images: [], assets });
+    app.load({ app: 'SerbestSayfa', title, page, hf: hfRes.hf, html, images: [], assets });
     placeAll(ctx);
     app.relayoutAll();
     app.resetHistory();
@@ -1079,7 +1249,9 @@
     const done = [];
     if (rep.images) done.push(`${rep.images} resim`);
     if (rep.captions) done.push(`${rep.captions} şekil yazısı`);
+    if (rep.hf) done.push('üst/alt bilgi');
     const notes = [];
+    if (rep.hfLost) notes.push(`üst/alt bilgideki ${rep.hfLost} öğe (resim, tablo, ek satır ya da kapağa özel içerik) alınamadı`);
     if (rep.tables) notes.push(`${rep.tables} tablo düz metne dönüştürüldü`);
     if (rep.textboxes) notes.push(`${rep.textboxes} metin kutusu paragrafa dönüştürüldü`);
     if (rep.unsupported) notes.push(`${rep.unsupported} resim desteklenmeyen biçimde (EMF/WMF/TIFF) olduğu için alınamadı`);
