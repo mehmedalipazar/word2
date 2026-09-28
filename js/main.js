@@ -14,7 +14,6 @@
   const commands = {
     new: () => newDoc(false),
     open: openDoc,
-    save: () => saveDoc(false),
     close: () => newDoc(true),
     docx: exportDocx,
     print: printDoc,
@@ -124,8 +123,9 @@
       return;
     }
     if (k === 's') {
+      // Tek çıktı Word dosyası: Ctrl+S (Word alışkanlığı) belgeyi .docx olarak indirir
       e.preventDefault();
-      saveDoc(e.shiftKey);
+      exportDocx();
     } else if (k === 'o') {
       e.preventDefault();
       openDoc();
@@ -643,25 +643,23 @@
     SS.toast('Son çalışmanız geri yüklendi.' + (more ? ` Kurtarılabilecek ${more} belge daha var; yeni bir sekmede açılır.` : ''), more ? 6000 : 2800);
   }
 
-  // ---------- Dosya: yeni / aç / kaydet / Word'e aktar ----------
-  let fileHandle = null;
+  // ---------- Dosya: yeni / aç / indir (.docx) ----------
+  // Uygulamanın tek çıktısı Word dosyasıdır; .sayfa artık yazılmaz ama eski .sayfa dosyaları açılabilir.
   const hasContent = () => els.editor.innerText.trim().length > 0 || state.images.length > 0;
-  const FILE_TYPES = [{ description: 'SerbestSayfa belgesi', accept: { 'application/json': ['.sayfa'] } }];
   const OPEN_TYPES = [
     {
-      description: 'SerbestSayfa ya da Word belgesi',
+      description: 'Word belgesi',
       accept: {
-        'application/json': ['.sayfa', '.json'],
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+        'application/json': ['.sayfa', '.json'],
       },
     },
   ];
-  // Word gibi: kaydedilmemiş değişiklik varsa "Kaydet / Kaydetme / Vazgeç" sorulur; true: devam edilebilir.
-  // Kaydet seçilip kayıt penceresinden vazgeçilirse belge açık kalır.
+  // Word gibi: indirilmemiş değişiklik varsa "İndir / İndirme / Vazgeç" sorulur; true: devam edilebilir
   const saveDlg = $('saveDialog');
   function askSave() {
     if (saveDlg.open) return Promise.resolve(''); // pencere açıkken gelen ikinci istek (ör. Ctrl+O)
-    $('saveAsk').textContent = `"${state.fileName}" belgesinde kaydedilmemiş değişiklikler var. Kaydetmezseniz bu değişiklikler kaybolur.`;
+    $('saveAsk').textContent = `"${state.fileName}" belgesinde indirilmemiş değişiklikler var. İndirmezseniz bu değişiklikler kaybolur.`;
     saveDlg.returnValue = '';
     saveDlg.showModal();
     return new Promise((resolve) => saveDlg.addEventListener('close', () => resolve(saveDlg.returnValue), { once: true }));
@@ -671,8 +669,8 @@
     const answer = await askSave();
     if (answer === 'discard') return true;
     if (answer !== 'save') return false;
-    await saveDoc(false);
-    return !dirty;
+    await exportDocx();
+    return !dirty; // indirme başarısız olduysa belge açık kalır
   }
 
   // Yeni belge ya da belgeyi kapat (Word: Dosya > Kapat). Tek belgelik uygulamada kapatınca boş belge kalır; boş
@@ -680,7 +678,6 @@
   async function newDoc(closing) {
     if (!(await confirmDiscard())) return;
     const name = state.fileName;
-    fileHandle = null;
     app.newDocument();
     dirty = false;
     autosaveNow();
@@ -694,7 +691,6 @@
       if (/\.docx$/i.test(file.name)) {
         SS.toast('Word belgesi açılıyor…', 20000);
         const rep = await SS.importDocx(file);
-        fileHandle = null; // kaydederken .sayfa olarak yeni yer sorulsun
         SS.toast(SS.importSummary(rep), 8000);
       } else {
         let data = null;
@@ -720,15 +716,14 @@
 
   async function openDoc() {
     if (!(await confirmDiscard())) return;
-    // Kayıt penceresi uzun sürdüyse tıklamanın verdiği izin (geçici etkinlik) bitmiş olur ve Chrome dosya seçiciyi
-    // açmaz: sessizce hiçbir şey olmaması yerine yeniden tıklamayı iste
+    // Önce indirme uzun sürdüyse (büyük belge) tıklamanın verdiği izin (geçici etkinlik) bitmiş olur ve Chrome dosya
+    // seçiciyi açmaz: sessizce hiçbir şey olmaması yerine yeniden tıklamayı iste
     if (navigator.userActivation && !navigator.userActivation.isActive)
       return void SS.toast("Açılacak dosyayı seçmek için Aç'a yeniden tıklayın.", 5000);
     if (window.showOpenFilePicker) {
       try {
         const [h] = await window.showOpenFilePicker({ types: OPEN_TYPES });
-        const file = await h.getFile();
-        if (await loadFile(file)) fileHandle = /\.(sayfa|json)$/i.test(file.name) ? h : null;
+        await loadFile(await h.getFile());
         return;
       } catch (err) {
         if (err.name === 'AbortError') return;
@@ -737,37 +732,18 @@
     $('fileOpen').click();
   }
 
-  async function saveDoc(asNew) {
-    const data = JSON.stringify(app.serialize());
-    const name = SS.safeFileName(state.fileName) + '.sayfa';
-    if (window.showSaveFilePicker) {
-      try {
-        if (!fileHandle || asNew) fileHandle = await window.showSaveFilePicker({ suggestedName: name, types: FILE_TYPES });
-        const w = await fileHandle.createWritable();
-        await w.write(data);
-        await w.close();
-        dirty = false;
-        return SS.toast('Kaydedildi: ' + fileHandle.name);
-      } catch (err) {
-        if (err.name === 'AbortError') return;
-        fileHandle = null;
-      }
-    }
-    SS.downloadBlob(new Blob([data], { type: 'application/json' }), name);
-    dirty = false;
-    SS.toast('"İndirilenler" klasörüne kaydedildi: ' + name);
-  }
-
+  // İndir (Ctrl+S): belge Word dosyası olarak İndirilenler klasörüne iner
   async function exportDocx() {
     try {
       app.clearSelection();
       const blob = await SS.exportDocx(app);
-      SS.downloadBlob(blob, SS.safeFileName(state.fileName) + '.docx');
+      const name = SS.safeFileName(state.fileName) + '.docx';
+      SS.downloadBlob(blob, name);
       dirty = false; // çalışma bir dosyada: kapatırken sorulmasın
-      SS.toast('Word dosyası hazır (İndirilenler klasörü).');
+      SS.toast('İndirildi: ' + name + ' (İndirilenler klasörü)');
     } catch (err) {
       console.error(err);
-      SS.toast('Dışa aktarılamadı: ' + err.message, 5000);
+      SS.toast('İndirilemedi: ' + err.message, 5000);
     }
   }
 

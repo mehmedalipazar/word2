@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SerbestSayfa</title>
-<meta name="description" content="Resimleri sayfada istediğiniz yere koyabildiğiniz, metin değişince kaymayan tarayıcı tabanlı kelime işlemci. Word (.docx) açar ve Word'e aktarır.">
+<meta name="description" content="Resimleri sayfada istediğiniz yere koyabildiğiniz, metin değişince kaymayan tarayıcı tabanlı kelime işlemci. Word (.docx) belgesi açar ve Word olarak indirir.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='5' y='2' width='22' height='28' rx='3' fill='%232f5bd3'/><rect x='10' y='8' width='10' height='8' rx='1' fill='white'/></svg>">
 <link rel="stylesheet" href="css/app.css">
 <style id="pageStyle"></style>
@@ -16,11 +16,10 @@
   <input id="docTitle" class="doc-title" value="Adsız belge" spellcheck="false" title="Belge adı">
   <div class="appbar-actions">
     <button class="btn" data-cmd="new" data-icon="file" title="Yeni belge">Yeni</button>
-    <button class="btn" data-cmd="open" data-icon="open" title="Aç: SerbestSayfa (.sayfa) ya da Word (.docx) belgesi (Ctrl+O)">Aç</button>
-    <button class="btn" data-cmd="save" data-icon="save" title="Kaydet (Ctrl+S)">Kaydet</button>
-    <button class="btn" data-cmd="close" data-icon="close" title="Belgeyi kapat (kaydedilmemiş değişiklik varsa kaydetmeyi sorar)">Kapat</button>
+    <button class="btn" data-cmd="open" data-icon="open" title="Aç: Word (.docx) belgesi (Ctrl+O)">Aç</button>
+    <button class="btn" data-cmd="close" data-icon="close" title="Belgeyi kapat (indirilmemiş değişiklik varsa indirmeyi sorar)">Kapat</button>
     <span class="sep"></span>
-    <button class="btn" data-cmd="docx" data-icon="download" title="Word (.docx) olarak dışa aktar">Word'e aktar</button>
+    <button class="btn" data-cmd="docx" data-icon="download" title="Word (.docx) olarak indir (Ctrl+S)">İndir</button>
     <button class="btn primary" data-cmd="print" data-icon="printer" title="Yazdır / PDF olarak kaydet (Ctrl+P)">PDF / Yazdır</button>
   </div>
 </header>
@@ -441,22 +440,22 @@
   </form>
 </dialog>
 
-<!-- Word gibi: Yeni, Aç, Kapat ve sürükle-bırakta kaydedilmemiş değişiklik varsa (main.js: confirmDiscard) -->
+<!-- Word gibi: Yeni, Aç, Kapat ve sürükle-bırakta indirilmemiş değişiklik varsa (main.js: confirmDiscard) -->
 <dialog id="saveDialog" class="dialog">
   <form method="dialog">
-    <h2>Değişiklikler kaydedilsin mi?</h2>
+    <h2>Belge indirilsin mi?</h2>
     <p class="ask" id="saveAsk"></p>
     <div class="actions">
-      <button value="discard" class="btn">Kaydetme</button>
+      <button value="discard" class="btn">İndirme</button>
       <span class="grow"></span>
       <button type="button" value="cancel" class="btn">Vazgeç</button>
-      <button value="save" class="btn primary" autofocus>Kaydet</button>
+      <button value="save" class="btn primary" autofocus>İndir</button>
     </div>
   </form>
 </dialog>
 
 <input type="file" id="fileImage" accept="image/*" multiple hidden>
-<input type="file" id="fileOpen" accept=".sayfa,.json,.docx" hidden>
+<input type="file" id="fileOpen" accept=".docx,.sayfa,.json" hidden>
 <div class="toast" id="toast" role="status"></div>
 
 <script src="js/util.js"></script>

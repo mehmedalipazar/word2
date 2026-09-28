@@ -121,14 +121,15 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
   - Selections are stored as paths counted the way the HTML re-parses on undo (adjacent text nodes as one, empty text nodes ignored; `pointOf`/`nodeAt`), so they survive text-node splits.
   - Native undo is intercepted: `beforeinput` `historyUndo`/`historyRedo` and Ctrl+Z.
   - Every user-visible change must end with `app.commit(...)`.
-- **`.sayfa` files** are the JSON from `app.serialize()`: `app: 'SerbestSayfa'`, the HTML, the images, the used assets, the page settings, `hf` (header/footer) and `styles`. Old files with `pageNumbers: true` load as a centered `{sayfa}` footer.
+- **Output is `.docx` only.** İndir (the `docx` command, Ctrl+S) downloads the document as a Word file. The UI no longer writes `.sayfa` files.
+- **`.sayfa` files** are the JSON from `app.serialize()`, which still backs autosave, and Aç still opens them: `app: 'SerbestSayfa'`, the HTML, the images, the used assets, the page settings, `hf` (header/footer) and `styles`. Old files with `pageNumbers: true` load as a centered `{sayfa}` footer.
   - `app.load()` checks the top-level field types before touching the open document, so a broken file can't half-load. User-facing errors are thrown as plain `Error` with a Turkish message; `loadFile` shows those and replaces browser errors (`TypeError`, `SyntaxError`…) with a generic Turkish message.
 - **Header/footer** (`state.hf`): `{ header: [left, center, right], footer: [...], firstPage }`. Slots are plain text with `{sayfa}` / `{toplam}` tokens. They are drawn on the pages (`renderPages`), exported as header/footer parts with center/right tab stops and PAGE/NUMPAGES fields (`firstPage` → `titlePg` + empty first-page parts), and imported from the first non-empty paragraph of Word's default header/footer.
 - **Autosave** is per tab: IndexedDB key `autosave:<tab id>`, where the tab id lives in `sessionStorage`. Each open tab holds a Web Lock (`serbestsayfa-sekme:<id>`). A new tab adopts only records whose lock is free (closed tabs). The old single `autosave` key is adopted the same way.
   - On `pagehide`, `beforeunload` and `visibilitychange→hidden`, unsaved changes are also written synchronously to `localStorage` (`serbestsayfa-acil:<id>`), because async IndexedDB writes don't survive unload. On startup the newer of the two is used.
-  - `beforeunload` asks before closing while there are unsaved changes (cleared by save, open, new, and Word export).
-  - Inside the app, New, Open, dropping a file and Close go through async `confirmDiscard()`. With unsaved changes it shows `#saveDialog` (Kaydet / Kaydetme / Vazgeç). Kaydet runs `saveDoc` and continues only if the document really got saved.
-  - A save picker can outlast the click's transient activation. `openDoc` then asks for another click instead of calling a file picker Chrome would block.
+  - `beforeunload` asks before closing while there are unsaved changes (cleared by İndir, open and new).
+  - Inside the app, New, Open, dropping a file and Close go through async `confirmDiscard()`. With unsaved changes it shows `#saveDialog` (İndir / İndirme / Vazgeç). İndir runs `exportDocx` and continues only if the download succeeded.
+  - A long export can outlast the click's transient activation. `openDoc` then asks for another click instead of calling a file picker Chrome would block.
   - Close is New plus a toast. The empty document's autosave deletes the tab's recovery record.
 
 ### Text editing (text.js)

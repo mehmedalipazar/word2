@@ -111,17 +111,18 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   "Ω Simge…") ve Bul/Değiştir'de de çalışır; simge ekleme ve Alt+X ayrı geri alma adımıdır.
 - **Sözcük sayısı**: durum çubuğunda; metin seçiliyken "seçili / toplam" (ör. "7 / 1.250 sözcük"). Sayıya tıklamak
   (ya da Ctrl+Shift+G) sayfa, sözcük, karakter (boşluklu/boşluksuz), paragraf ve satır sayısını gösterir.
-- Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
-  son yazılanlar da korunur; kaydedilmemiş değişiklik varken kapatma/yenilemede tarayıcı uyarır. Kapanan sekmenin
-  belgesi, sonra açılan yeni sekmede geri gelir.
-- **Kapat**: belgeyi kapatır. Kaydedilmemiş değişiklik varsa Word'deki gibi Kaydet / Kaydetme / Vazgeç sorar; Yeni, Aç
-  ve dosyayı sayfaya sürükleyip bırakma da aynı soruyu sorar. Kaydet seçilip kayıt penceresinden vazgeçilirse belge
-  açık kalır. Kapatınca boş belge açılır ve sekmenin kurtarma kaydı silinir. Ctrl+W tarayıcıya ayrıldığı için kısayolu yok.
+- **İndir** (Ctrl+S): belge Word dosyası (.docx) olarak İndirilenler klasörüne iner; uygulamanın tek çıktısı budur.
+  Aç, Word belgelerini (eski `.sayfa` dosyalarını da) açar. Tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma
+  kaydı var, sayfa kapanırken son yazılanlar da korunur; indirilmemiş değişiklik varken kapatma/yenilemede tarayıcı
+  uyarır. Kapanan sekmenin belgesi, sonra açılan yeni sekmede geri gelir.
+- **Kapat**: belgeyi kapatır. İndirilmemiş değişiklik varsa Word'deki gibi İndir / İndirme / Vazgeç sorar; Yeni, Aç
+  ve dosyayı sayfaya sürükleyip bırakma da aynı soruyu sorar. İndir seçilirse belge önce .docx olarak iner. Kapatınca
+  boş belge açılır ve sekmenin kurtarma kaydı silinir. Ctrl+W tarayıcıya ayrıldığı için kısayolu yok.
 - **Word belgesi açma (.docx)**: metin, başlıklar (numaralarıyla), biçimler, listeler (düzeyleri ve biçimleriyle: a), I.,
   1.1., –…; araya paragraf girse de numara sürer), satır aralıkları, girintiler, sekme durakları, sayfa ayarları, üst/alt bilgi (metin ve sayfa numarası), resimler
   (kırpma/döndürme/metin kaydırma dahil). Resmin hemen altındaki "Şekil 3. …" paragrafı ya da resimle gruplanmış
   yazı kutusu, o resmin şekil yazısı olarak gelir. "Aç" düğmesiyle ya da dosyayı sayfaya sürükleyerek.
-- **Word'e aktar (.docx)**: resimler sayfaya göre mutlak konumla yazılır; çapa, resmin sayfasında başlayan bir
+- **İndirilen Word dosyası (.docx)**: resimler sayfaya göre mutlak konumla yazılır; çapa, resmin sayfasında başlayan bir
   paragrafa konur, böylece Word'de de aynı sayfada ve yerde durur. Şekil yazıları Word'ün "Resim Yazısı" stiliyle ve
   otomatik numara alanıyla yazılır (Word'de "Şekiller Tablosu" eklenebilir). Satır aralığı Word'ün satır birimiyle,
   dul/öksüz satır denetimi ve başlıklarda "sonrakiyle birlikte tut" açık yazılır.
@@ -133,7 +134,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 | Tuş | İş |
 | --- | --- |
 | Ctrl+Z / Ctrl+Y | Geri al / Yinele |
-| Ctrl+S / Ctrl+O / Ctrl+P | Kaydet / Aç / Yazdır |
+| Ctrl+S / Ctrl+O / Ctrl+P | İndir (.docx) / Aç / Yazdır |
 | Ctrl+F / Ctrl+H | Bul / Bul ve Değiştir (Enter: sonraki, Shift+Enter: önceki, Esc: kapat) |
 | Ctrl+B / Ctrl+I / Ctrl+U | Kalın / italik / altı çizili |
 | Ctrl+K | Köprü ekle / düzenle (Ctrl+tık: bağlantıyı aç) |
