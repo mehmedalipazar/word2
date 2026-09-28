@@ -876,6 +876,7 @@
     const onKey = (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
+        e.stopPropagation(); // resim seçili kalır: belgedeki Enter (seçili resmin yazısını düzenle) yazıyı yeniden açmasın
         t.blur();
       } else if (e.key === 'Escape') {
         e.preventDefault();

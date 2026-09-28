@@ -261,7 +261,8 @@
     let c = L ? L.start - 1 : 0;
     return [...els.editor.querySelectorAll('h1')].map((h, idx) => {
       if (!L || h.getAttribute('data-num') !== '0') c++;
-      const y = (h.getBoundingClientRect().top - fr.top) / z;
+      // ilk satırın yeri (sayfa sonunda itilen başlıkta kutunun üstü önceki sayfada kalır: pushHanging)
+      const y = (h.getBoundingClientRect().top - fr.top) / z + (parseFloat(getComputedStyle(h).paddingTop) || 0);
       const page = Math.max(0, Math.floor(y / g.stride));
       return { page, y: y - page * g.stride + g.m.t, idx, text: chapterText(c) };
     });
@@ -271,7 +272,9 @@
   // Akış koordinatları: (0,0) = ilk sayfanın metin alanının sol-üst köşesi.
   // k. sayfanın metin alanı: y ∈ [k*stride, k*stride + ch]
   const keep = []; // keep[k]: sayfalama kuralları için k. sayfanın metin alanından alttan kısılan yükseklik (px)
-  function computeBands() {
+  // extra: resmin yanındaki bloğun girintisi kadar genişletilen sol şerit parçaları [y0, y1, x] (indentRows).
+  // Döner: { bands, lefts: resimlerin sol şeritleri [y0, y1, x] (genişletmeden önce) }
+  function computeBands(extra = []) {
     const { cw, ch, stride, m } = app.geom();
     const full = [];
     const left = [];
@@ -305,6 +308,8 @@
       else if (spaceR >= spaceL) left.push([y0, y1, x1]);
       else right.push([y0, y1, x0]);
     }
+    const lefts = left.slice();
+    left.push(...extra);
 
     const ys = new Set([0]);
     for (const list of [full, left, right]) for (const it of list) ys.add(it[0]).add(it[1]);
@@ -335,7 +340,7 @@
       if (last && Math.abs(last.b - a) < 0.01 && last.xL === xL && last.xR === xR && !isCut(a)) last.b = b;
       else bands.push({ a, b, xL, xR });
     }
-    return bands;
+    return { bands, lefts };
   }
 
   function mkFloat(side, clear, w, h, mt) {
@@ -350,11 +355,33 @@
   // Float'lar doğrudan #flow'un çocuğudur: #flow tüm sayfalar boyunca uzandığı için yazdırırken
   // tarayıcı şeritleri sayfalara doğru böler (sıfır yükseklikli bir kapsayıcı içinde bölünmüyordu).
   let sideBands = []; // metnin yanından aktığı şeritler (resmin yanı); fitTabs bunların yanındaki paragrafı yeniden ölçer
+  let sideExtra = []; // resmin yanındaki blokların girintisi (indentRows); bir sonraki çizim bundan başlar
+  let lastBands = [];
   function renderExclusions() {
+    // Şeritler çizilir, sonra asılı girintili ilk satırlar (pushHanging) ve resmin yanındaki girintiler (indentRows)
+    // ölçülür. Değişen olursa yeniden ölçülür/çizilir; ikisi de kendi sonucuna göre sabit olduğundan birkaç turda durur.
+    let extra = sideExtra;
+    for (let i = 0; i < 3; i++) {
+      const { bands, lefts } = computeBands(extra);
+      drawBands(bands);
+      sideExtra = extra;
+      settleHanging();
+      const next = lefts.length ? indentRows(lefts) : [];
+      if (sameRows(next, extra)) break;
+      extra = next;
+    }
+  }
+  // İtme kuralları sabitlenene kadar (bir itme sonraki blokları kaydırabilir: asılı paragrafın satırları değişir)
+  function settleHanging() {
+    let changed = false;
+    for (let i = 0; i < 4 && pushHanging(lastBands); i++) changed = true;
+    return changed;
+  }
+  function drawBands(bands) {
     const { cw } = app.geom();
     const frag = document.createDocumentFragment();
     let prev = 0;
-    const bands = computeBands();
+    lastBands = bands;
     sideBands = bands.filter((bd) => bd.xL < cw);
     for (const bd of bands) {
       const mt = bd.a - prev;
@@ -368,6 +395,181 @@
     els.flow.querySelectorAll(':scope > .ex').forEach((el) => el.remove());
     els.flow.insertBefore(frag, els.editor);
   }
+
+  // ---------- Asılı girintili ilk satır ve şeritler ----------
+  // Chrome, eksi text-indent'li ilk satırı (liste maddesi, numaralı başlık, asılı girintili paragraf) tam genişlikteki
+  // şeridin (sayfa arası, sayfalama kuralı, üst-alt sarmalı resim) yanına, şeridin sağ kenarından |text-indent| geriye
+  // yerleştiriyor: numara, madde işareti ya da ilk sözcük önceki sayfanın sağ kenarında kalıyor, geri kalanı şeridin
+  // altına iniyor. İlk satırı böyle bir şeride değen blok bütün olarak şeridin sonrasına taşınır (pushHanging). Kural
+  // belgeye yazılmaz: düzenin kendi stil sayfasındadır (#hangFix), bloğu editördeki yeriyle (nth-child) seçer ve her
+  // şerit çiziminde yeniden kurulur. Yazdırırken sayfa sınırında kutu sınırdan başlar, üst kenar boşluğu padding-top
+  // olur: ilk satırın yeri kutunun üstü + padding-top'tur (chapterMarks, unitLines).
+  const hangSheet = document.head.appendChild(document.createElement('style'));
+  hangSheet.id = 'hangFix';
+  let hangUnits = null; // blok birimleri (unitsOf); app.layout her çağrıda yeniler, sayfalama aynısını kullanır
+  const nthPath = (el) => {
+    const parts = [];
+    for (let n = el; n.parentElement && n !== els.editor; n = n.parentElement)
+      parts.unshift(`:nth-child(${Array.prototype.indexOf.call(n.parentElement.children, n) + 1})`);
+    return '.flow:not(.nobands) > #editor > ' + parts.join(' > ');
+  };
+  // Birimlerin akıştaki üst kenarı (belge sırasıyla artar): üstü y'den küçük olmayan ilk birim
+  function unitTops() {
+    const f = els.flow.getBoundingClientRect();
+    const z = state.zoom;
+    const tops = new Map();
+    return (u) => {
+      let t = tops.get(u);
+      if (t === undefined) tops.set(u, (t = (u.getBoundingClientRect().top - f.top) / z));
+      return t;
+    };
+  }
+  function firstUnit(units, y, topOf) {
+    let lo = 0;
+    let hi = units.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (topOf(units[mid]) < y) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+  // Bloğun üstündeki (birleşmiş) kenar boşluğu: önceki blok kutusunun altından bloğun üstüne (px)
+  function marginAbove(u, t) {
+    const f = els.flow.getBoundingClientRect().top;
+    for (let e = u; ; e = e.parentElement) {
+      const p = e.previousElementSibling;
+      if (p && /^(P|H[1-6]|DIV|UL|OL|LI|BLOCKQUOTE|PRE)$/.test(p.tagName)) return t - (p.getBoundingClientRect().bottom - f) / state.zoom;
+      if (e.parentElement === els.editor || e.parentElement.tagName === 'LI') return 0; // belgenin başı; maddenin içindeki alt liste
+    }
+  }
+  // Döner: kurallar değiştiyse true.
+  // Blok bütün olarak şeridin sonrasına taşınır: margin-top kutuyu şeridin bittiği yere getirir (Word'deki gibi
+  // yeni sayfada başlar). Yazdırırken Chrome sayfalara bölerken sayfa sınırını aşan boşluğu farklı işliyor
+  // (kenar boşluğu kesilen sayfada düşüyor): orada kutu margin-top ile fiziksel sayfa sınırına gelir, şeridin
+  // kalanı (üst kenar boşluğu) padding-top olur. İtilen bloğun kendi yeri artık ölçülemediğinden itmeden önceki
+  // üst boşluğu saklanır (pushState): doğal yeri = şimdiki üstü − uygulanan margin + kendi boşluğu.
+  // Şeritler belge sırasıyla karara bağlanır ve bir şeridin kuralı değişince hemen yazılır: bir itme sonraki
+  // sayfaların metnini kaydırır, sonraki şerit ancak öncekiler yerleşince doğru ölçülür (hepsi aynı ölçümden
+  // hesaplanınca uzun belgede kurallar yerleşmiyor, eskiyen itmeler sayfa ortasında boşluk bırakıyordu).
+  // Yerinde duran itme korunur: piksel altı ölçüm farkı kuralı her çizimde değiştirip düzeni yeniden hesaplatmasın.
+  // Her yazım bir düzen hesabıdır: yukarıda bir satır eklenince her sayfa arasındaki itme değişebilir. Yazarken en çok
+  // HANG_BUDGET şerit hemen yerleşir, kalanı sayfalamayla arka planda (dul/öksüz satır kuralları gibi): k. sayfa sınırı
+  // karara bağlanırken (paginateBoundary) o sınıra kadarki şeritler hep yerleşir, sonrakiler kendi sırasını bekler.
+  const HANG_BUDGET = 2;
+  let hangUpto = -Infinity; // üstü bundan önce olan şeritler sınırsız yazılır
+  let hangBudget = Infinity; // sonrakilerden daha kaçının kuralı yazılabilir (app.layout, paginateBoundary kurar)
+  let hangFrom = Infinity; // yerleşmemiş ilk şeridin üstü (akış y); Infinity: hepsi yerinde
+  let pushState = new Map(); // blok → { mt: uygulanan margin-top, nat: bloğun doğal (birleşmiş) üst boşluğu, pad }
+  function writeHang() {
+    const px = (v) => +v.toFixed(2);
+    const rules = [...pushState].map(([u, s]) => `${nthPath(u)} { margin-top: ${px(s.mt)}px;${s.pad ? ` padding-top: ${s.pad}px;` : ''} }`);
+    const css = rules.sort().join('\n');
+    if (css === hangSheet.textContent) return false;
+    hangSheet.textContent = css;
+    return true;
+  }
+  function pushHanging(bands) {
+    const { cw, stride, m } = app.geom();
+    const full = []; // bitişik tam şeritler tek aralık (yazdırmada sayfa sınırında bölünmüş olabilir)
+    for (const bd of bands) {
+      if (bd.xL < cw) continue;
+      const last = full[full.length - 1];
+      if (last && bd.a - last.b < 0.5) last.b = bd.b;
+      else full.push({ a: bd.a, b: bd.b });
+    }
+    // Kural bloğu editördeki yeriyle seçer: araya blok girdiyse ya da blok silindiyse önce doğru bloklara yazılır
+    for (const u of pushState.keys()) if (!els.editor.contains(u)) pushState.delete(u);
+    let changed = writeHang();
+    hangFrom = Infinity;
+    if (!full.length && !pushState.size) return changed;
+    const units = hangUnits || (hangUnits = unitsOf());
+    let topOf = unitTops();
+    const done = new Set(); // bu çizimde yeri karara bağlanan itilmiş bloklar
+    // Bir şeridin değişikliklerini ([blok, durum | null]) uygular; yazım hakkı bittiyse şerit bekler (false)
+    const commit = (ops, a) => {
+      if (!ops.length) return true;
+      const free = a < hangUpto;
+      if (!free && hangBudget <= 0) {
+        hangFrom = a;
+        return false;
+      }
+      for (const [u, s] of ops) s ? pushState.set(u, s) : pushState.delete(u);
+      if (writeHang()) {
+        changed = true;
+        if (!free) hangBudget--;
+        topOf = unitTops(); // sonraki şeritler yeni düzende ölçülür
+      }
+      return true;
+    };
+    const stale = (keep) => [...pushState.keys()].filter((u) => !done.has(u) && !keep(u)).map((u) => [u, null]);
+    for (const { a, b } of full) {
+      // önceki şeritle bunun arasında kalan eski itmeler: artık hiçbir şeride değmiyor
+      if (!commit(stale((u) => topOf(u) >= a - 120), a)) return changed;
+      const k = Math.ceil((a + m.t) / stride); // şeritteki fiziksel sayfa sınırı (yazdırırken)
+      const cut = app.printMode && k * stride - m.t > a + 0.5 && k * stride - m.t < b - 0.5 ? k * stride - m.t : null;
+      const top = cut === null ? b : cut; // kutunun üstü buraya gelir
+      const pad = cut === null ? 0 : +(b - cut + 0.1).toFixed(2);
+      const ops = [];
+      for (let i = firstUnit(units, a - 120, topOf); i < units.length; i++) {
+        const u = units[i];
+        const t = topOf(u);
+        const was = pushState.get(u);
+        const t0 = was ? t - was.mt + was.nat : t; // itilmeden önceki yeri
+        if (t0 >= b - 0.5) break;
+        if (done.has(u)) continue;
+        // asılı girinti yalnızca maddede, numaralı başlıkta ya da paragrafın kendi text-indent'inde olur
+        let hangs = u.tagName === 'LI' || u.style.textIndent.startsWith('-') || app.isNumbered(u);
+        if (hangs) {
+          const cs = getComputedStyle(u);
+          const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+          hangs = parseFloat(cs.textIndent) < -0.5 && t0 + lh > a + 0.5;
+        }
+        if (!hangs) {
+          if (was) ops.push([u, null]);
+          continue;
+        }
+        done.add(u);
+        if (was && was.pad === pad && t >= top + 0.05 && t <= top + 1) continue; // yerinde
+        // +0,3 px: düzenin piksel altı yuvarlaması kutuyu şeridin (sayfa sınırının) hemen üstünde bırakmasın
+        const nat = was ? was.nat : marginAbove(u, t);
+        ops.push([u, { mt: nat + top + 0.3 - t0, nat, pad }]);
+      }
+      if (!commit(ops, a)) return changed;
+    }
+    const rest = stale(() => false); // son şeridin ardında kalanlar (bekletilmez: sonrasında ölçülecek şerit yok)
+    rest.forEach(([u]) => pushState.delete(u));
+    return (rest.length && writeHang()) || changed;
+  }
+  // Resmin yanından akan blok Word'deki gibi girintisini resmin kenarından alır: sol şerit, bloğun resmin yanındaki
+  // satırları boyunca bloğun sol girintisi kadar genişler (madde işareti ve asılı girintinin ilk satırı da resmin altına
+  // girmez). Döner: [y0, y1, x] şerit parçaları (computeBands'e extra)
+  function indentRows(lefts) {
+    const { cw } = app.geom();
+    const units = hangUnits || (hangUnits = unitsOf());
+    const f = els.flow.getBoundingClientRect();
+    const z = state.zoom;
+    const topOf = unitTops();
+    const rows = [];
+    for (const [y0, y1, x] of lefts) {
+      let i = firstUnit(units, y0, topOf);
+      while (i > 0 && (units[i - 1].getBoundingClientRect().bottom - f.top) / z > y0) i--; // şeridin üstünden uzananlar
+      for (; i < units.length; i++) {
+        const u = units[i];
+        const r = u.getBoundingClientRect();
+        const top = (r.top - f.top) / z;
+        const bottom = (r.bottom - f.top) / z;
+        if (top >= y1) break;
+        if (bottom <= y0) continue;
+        const cs = getComputedStyle(u);
+        const left = (r.left - f.left) / z + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.borderLeftWidth) || 0);
+        const shift = Math.max(left, -(parseFloat(cs.textIndent) || 0));
+        if (shift > 0.5) rows.push([Math.max(y0, top), Math.min(y1, bottom), Math.min(x + shift, cw - app.MIN_TEXT_W)]);
+      }
+    }
+    return rows;
+  }
+  const sameRows = (p, q) => p.length === q.length && p.every((r, i) => r.every((v, j) => Math.abs(v - q[i][j]) < 0.5));
 
   // Tarayıcının düzenleme komutları (kalın, punto, hizalama, liste…) her adımda satırları yeniden dizer; şerit
   // float'ları dururken bu, uzun belgede belge boyuyla karesel büyür (47 sayfada Tümünü seç + Kalın: 14 sn).
@@ -617,10 +819,12 @@
       return d;
     };
     const pf = document.createDocumentFragment();
-    const bf = document.createDocumentFragment();
-    const ff = document.createDocumentFragment();
+    // Resim katmanlarının sayfa kutuları yerinde kalır (yalnızca boyu ve sayısı değişir): sayfa sayısı değişince
+    // resimler ve şekil yazıları yeniden kurulmasın, düzenlenen şekil yazısı odağını kaybetmesin
+    for (const layer of [els.behind, els.front]) while (layer.childElementCount > state.pageCount) layer.lastElementChild.remove();
     for (let k = 0; k < state.pageCount; k++) {
       const box = `top:${k * g.stride}px;width:${g.PW}px;height:${g.PH}px`;
+      for (const layer of [els.behind, els.front]) (layer.children[k] || layer.appendChild(mk('pclip'))).style.cssText = box;
       const page = mk('page' + (state.grid ? ' grid' : ''), box);
       page.dataset.page = k;
       page.appendChild(mk('mguide', `left:${g.m.l}px;top:${g.m.t}px;width:${g.cw}px;height:${g.ch}px`));
@@ -634,12 +838,8 @@
         page.appendChild(el);
       }
       pf.appendChild(page);
-      bf.appendChild(mk('pclip', box));
-      ff.appendChild(mk('pclip', box));
     }
     els.pages.replaceChildren(pf);
-    els.behind.replaceChildren(bf);
-    els.front.replaceChildren(ff);
     app.renderImages();
     updateDocSize();
   }
@@ -724,6 +924,7 @@
     const existing = new Map();
     els.doc.querySelectorAll('.img-obj').forEach((el) => existing.set(el.dataset.id, el));
     const nums = app.captionNumbers();
+    const lastIn = new Map(); // sayfa kutusu → oraya z sırasıyla son yerleşen resim
     for (const img of [...state.images].sort((a, b) => a.z - b.z)) {
       let el = existing.get(img.id);
       if (el) existing.delete(img.id);
@@ -742,7 +943,12 @@
       }
       placeImageEl(el, img);
       const clip = clipFor(img);
-      if (clip) clip.appendChild(el);
+      if (clip) {
+        // Yerinde (doğru kutuda, z sırasında) duran resim taşınmaz: ardındaki şekil yazısı düzenleniyor olabilir
+        const prev = lastIn.get(clip);
+        if (el.parentElement !== clip || (prev && !(prev.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))) clip.appendChild(el);
+        lastIn.set(clip, el);
+      }
       placeCaption(img, clip, nums);
     }
     existing.forEach((el) => el.remove());
@@ -817,7 +1023,8 @@
     }
     if (!lines.length) {
       const b = u.getBoundingClientRect();
-      lines.push({ top: (b.top - f) / z, bottom: (b.bottom - f) / z });
+      const pt = parseFloat(getComputedStyle(u).paddingTop) || 0; // itilen ilk satır (pushHanging)
+      lines.push({ top: (b.top - f) / z + pt, bottom: (b.bottom - f) / z });
     }
     return lines;
   }
@@ -916,6 +1123,9 @@
   // Bir sayfa sınırını karara bağla; sonraki sayfanın başı öncekiyle aynıysa true
   function paginateBoundary(k, units) {
     const { stride, ch } = app.geom();
+    hangUpto = (k + 1) * stride; // bu sınıra kadarki itmeler ölçümden önce yerleşir, sonrakiler kendi sırasında
+    hangBudget = 0;
+    if (hangFrom < Infinity && settleHanging()) fitPageBreaks();
     const had = keep[k] || 0;
     if (had) {
       keep[k] = 0; // kuralsız doğal düzene bak
@@ -954,17 +1164,25 @@
         const k = dirty.from;
         const same = paginateBoundary(k, units);
         dirty.from = k + 1;
-        if (same && k >= dirty.to) dirty.from = Infinity; // sonrası değişmedi
+        if (same && k >= dirty.to && hangFrom === Infinity) dirty.from = Infinity; // sonrası değişmedi
         if (!sync && performance.now() - t0 > 24 && dirty.from < state.pageCount - 1) {
           pagTimer = setTimeout(step, 0); // arayüz donmasın
           break;
         }
       }
       if (dirty.from >= state.pageCount - 1) {
+        if (hangFrom < Infinity) {
+          hangUpto = Infinity; // son sayfalardaki itmeler
+          if (settleHanging()) {
+            fitPageBreaks();
+            fitPageCount();
+          }
+        }
         dirty.from = Infinity;
         dirty.to = -1;
         keep.length = Math.min(keep.length, Math.max(0, state.pageCount - 1));
         app.storeKeep();
+        refreshChapterCaptions(); // başlıklar sayfalamayla yer değiştirmiş olabilir (bölüm numaralı şekil yazıları)
       }
       updateDocSize();
       app.onLayout && app.onLayout();
@@ -996,8 +1214,8 @@
     app.markDirty(page(y0) - 1, page(y1) + 1);
   }
   // Bekleyen sayfalamayı hemen bitir (dışa aktarma, yazdırma, içe aktarma)
-  app.paginateNow = (upto) => dirty.from < Infinity && paginate(true, upto);
-  app.paginationPending = () => dirty.from < Infinity;
+  app.paginateNow = (upto) => (dirty.from < Infinity || hangFrom < Infinity) && paginate(true, upto);
+  app.paginationPending = () => dirty.from < Infinity || hangFrom < Infinity;
 
   // ---------- Düzen ----------
   // Yalnızca <br> içeren boş satırlar tarayıcıda float şeritlerini yok sayar (sayfa arasına düşer).
@@ -1388,8 +1606,12 @@
 
   app.layout = function () {
     markEmptyLines();
+    hangUnits = null; // belge değişmiş olabilir
+    hangUpto = app.printMode ? Infinity : -Infinity; // yazdırırken sayfalama çalışmaz: itmelerin hepsi şimdi yerleşir
+    hangBudget = HANG_BUDGET;
     renderExclusions();
     fitTabs();
+    if (settleHanging()) fitTabs(); // sekme genişlikleri satırları kaydırmış olabilir
     fitPageBreaks();
     for (let i = 0; i < 25; i++) {
       const n = neededPages();
@@ -1398,12 +1620,17 @@
       renderPages();
       renderExclusions();
       fitTabs();
+      if (settleHanging()) fitTabs();
       fitPageBreaks();
     }
     keep.length = Math.min(keep.length, Math.max(0, state.pageCount - 1));
     if (selDirty) {
       selDirty = false;
       markSelectionPages(); // düzen güncel: ölçüm ek maliyetsiz
+    }
+    if (hangFrom < Infinity) {
+      const k = Math.floor(hangFrom / app.geom().stride);
+      if (dirty.from > k) app.markDirty(k, k); // kalan itmeler arka planda (paginateBoundary)
     }
     refreshChapterCaptions();
     updateDocSize();

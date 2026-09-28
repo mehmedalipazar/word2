@@ -59,6 +59,9 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   başlıklara verilmiş numaraları böyle açılır, Word'e başlık stillerine bağlı liste olarak gider.
 - Listeler Word'ün asılı girintisiyle (işaret 0,63 cm, metin 1,27 cm; alt düzeyler 1,27 cm içeride, •/o/▪ ve 1./a./i.);
   maddenin başında Backspace önce işareti kaldırır (metin yerinde kalır), numara sonraki maddelerde sürer.
+- Sayfa sonuna düşen numaralı başlık, liste maddesi ya da asılı girintili paragraf (Kaynaklar) Word'deki gibi numarası,
+  madde işareti ve ilk sözcüğüyle birlikte yeni sayfada başlar; ekranda da baskıda da. Resmin yanından akan paragrafın
+  ve maddenin girintisi resmin kenarından ölçülür (Word gibi; madde işareti resmin altında kalmaz).
 - **Liste girintisi** Word'deki gibi sol kenardan ölçülür ve liste (düzey) ya da madde başına ayarlanabilir (cetvel,
   Paragraf penceresi). Word'den açılan ya da yapıştırılan listenin kendi girintisi korunur (kurumsal şablonlardaki
   sol kenara dayalı madde işareti, "MADDE 1 –" gibi uzun numaralar için geniş asılı girinti), Word'e aynen gider.
@@ -95,8 +98,8 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   tek adımdır; imleç başka yere götürülüp yazılınca yeni adım başlar.
 - **Simge** (Ω düğmesi): son kullanılanlar, birim ve matematik işaretleri (° ± × ≤ ≥ ‰ µ Ω …), Yunan harfleri, oklar,
   noktalama ve para işaretleri; karakter kodu da yazılabilir. Word'deki gibi metinde kodu yazıp Alt+X (00B0 → °).
-  İkisi de şekil yazısında, üst/alt bilgi kutularında (Sayfa yapısı penceresinde "Ω Simge…") ve Bul/Değiştir'de de
-  çalışır; simge ekleme ve Alt+X ayrı geri alma adımıdır.
+  İkisi de şekil yazısında (resmin bağlam çubuğunda da Ω var), üst/alt bilgi kutularında (Sayfa yapısı penceresinde
+  "Ω Simge…") ve Bul/Değiştir'de de çalışır; simge ekleme ve Alt+X ayrı geri alma adımıdır.
 - **Sözcük sayısı**: durum çubuğunda; metin seçiliyken "seçili / toplam" (ör. "7 / 1.250 sözcük"). Sayıya tıklamak
   (ya da Ctrl+Shift+G) sayfa, sözcük, karakter (boşluklu/boşluksuz), paragraf ve satır sayısını gösterir.
 - Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
