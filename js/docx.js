@@ -86,14 +86,31 @@
 
   // ---------- Numaralandırma ----------
   function makeNumbering() {
-    const nums = []; // { id, ordered, start }
+    const nums = []; // { id, ordered, start } ya da başlık listesi { id, heads }
+    let heads = null;
     return {
       add(ordered, start = 1) {
         const id = nums.length + 1;
         nums.push({ id, ordered, start });
         return id;
       },
+      // Başlık numaralandırması (core.js: styles.num): düzeyleri Başlık 1–3 stillerine bağlı çok düzeyli liste
+      headings(levels) {
+        heads = levels;
+        const id = nums.length + 1;
+        nums.push({ id, heads: true });
+        return id;
+      },
       xml() {
+        const headLvls = () =>
+          heads.map((L, i) => {
+            // Numarasız düzey stile bağlanmaz; alt düzeylerin metninde geçebileceği için tanımı yazılır
+            const H = L || { text: `%${i + 1}.`, fmt: 'decimal', start: 1, ind: 0, hang: 0, suff: 'tab', lgl: false };
+            const ind = `w:left="${Math.round(H.ind * 20)}" ${H.hang < 0 ? `w:firstLine="${Math.round(-H.hang * 20)}"` : `w:hanging="${Math.round(H.hang * 20)}"`}`;
+            return `<w:lvl w:ilvl="${i}"><w:start w:val="${H.start}"/><w:numFmt w:val="${H.fmt}"/>${L ? `<w:pStyle w:val="Heading${i + 1}"/>` : ''}` +
+              `${H.lgl ? '<w:isLgl/>' : ''}${H.suff !== 'tab' ? `<w:suff w:val="${H.suff}"/>` : ''}<w:lvlText w:val="${esc(H.text)}"/><w:lvlJc w:val="left"/>` +
+              `<w:pPr><w:ind ${ind}/></w:pPr></w:lvl>`;
+          }).join('');
         // Word'ün varsayılan liste girintisi (editör css'i de aynı): metin her düzeyde 1,27 cm içeride,
         // işaret 0,635 cm solunda
         const lvls = (ordered) => {
@@ -115,11 +132,14 @@
           '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
           `<w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${lvls(false)}</w:abstractNum>` +
           `<w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${lvls(true)}</w:abstractNum>` +
+          (heads ? `<w:abstractNum w:abstractNumId="2"><w:multiLevelType w:val="multilevel"/>${headLvls()}</w:abstractNum>` : '') +
           nums
             .map((n) =>
-              n.ordered
-                ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${n.start}"/></w:lvlOverride></w:num>`
-                : `<w:num w:numId="${n.id}"><w:abstractNumId w:val="0"/></w:num>`
+              n.heads
+                ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="2"/></w:num>`
+                : n.ordered
+                  ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${n.start}"/></w:lvlOverride></w:num>`
+                  : `<w:num w:numId="${n.id}"><w:abstractNumId w:val="0"/></w:num>`
             )
             .join('') +
           '</w:numbering>'
@@ -135,6 +155,8 @@
     const g = app.geom();
     const ed = app.els.editor;
     const numbering = makeNumbering();
+    const headNum = state.styles.num; // başlık numaralandırması: Başlık 1–3 stillerine bağlı liste
+    const headNumId = headNum ? numbering.headings(headNum) : 0;
 
     // Görseller (her varlık bir kez)
     const media = new Map();
@@ -304,6 +326,8 @@
     };
     const hexUp = (c) => c.slice(1).toUpperCase();
     const JC = { left: 'left', center: 'center', right: 'right', justify: 'both' };
+    const TAB_VAL = { l: 'left', c: 'center', r: 'right', d: 'decimal' };
+    const TAB_LEAD = { '.': 'dot', '-': 'hyphen', _: 'underscore' };
     const rPrCache = new Map();
     function rPr(el, blockEl) {
       const key = el;
@@ -367,6 +391,16 @@
       if (o.style) p.push(`<w:pStyle w:val="${o.style}"/>`);
       if (o.pageBreakBefore) p.push('<w:pageBreakBefore/>');
       if (o.numId && !o.cont) p.push(`<w:numPr><w:ilvl w:val="${o.ilvl}"/><w:numId w:val="${o.numId}"/></w:numPr>`);
+      // Numaralı başlık düzeyinde numarasız başlık (data-num="0") ve bölünen başlığın devamı: numId 0 (Word gibi)
+      const hk = /^Heading([1-3])$/.exec(o.style || '');
+      const numbered = !!(hk && headNum && headNum[hk[1] - 1]);
+      const noNum = numbered && (o.cont || blockEl.getAttribute('data-num') === '0');
+      if (noNum) p.push('<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>');
+      // Özel sekme durakları (core.js: data-tabs; px → twip)
+      const tabs = blockEl.dataset && blockEl.dataset.tabs ? app.parseTabs(blockEl.dataset.tabs) : [];
+      if (tabs.length)
+        p.push('<w:tabs>' + tabs.map((t) =>
+          `<w:tab w:val="${TAB_VAL[t.type]}"${t.leader ? ` w:leader="${TAB_LEAD[t.leader]}"` : ''} w:pos="${Math.round(t.pos * 15)}"/>`).join('') + '</w:tabs>');
       const fontPx = parseFloat(cs.fontSize);
       const st = styleOf(blockEl);
       // Birimsiz satır yüksekliği Word'ün "satır katı"dır (auto); birimli değer "En az"
@@ -380,13 +414,17 @@
       if (!sameSpacing) p.push(`<w:spacing w:before="${twip(before)}" w:after="${twip(o.mb)}" ${line}/>`);
       if (o.numId && o.cont) p.push(`<w:ind w:left="${720 * (o.ilvl + 1)}"/>`);
       else if (!o.numId) {
-        const ml = parseFloat(cs.marginLeft) || 0;
+        // Numaralı başlığın girintisi numaralandırmadan gelir: yalnızca başlığa ayrıca verilmişse (0 da olsa, ikisi
+        // birlikte) yazılır
+        const own = numbered && !noNum && (blockEl.style.marginLeft || blockEl.style.textIndent);
+        const fromNum = numbered && !noNum && !own;
+        const ml = fromNum ? 0 : parseFloat(cs.marginLeft) || 0;
         const mr = parseFloat(cs.marginRight) || 0;
-        const ti = o.cont ? 0 : parseFloat(cs.textIndent) || 0;
+        const ti = o.cont || fromNum ? 0 : parseFloat(cs.textIndent) || 0;
         const ind = [];
-        if (ml > 0) ind.push(`w:left="${twip(ml)}"`);
+        if (ml > 0 || own) ind.push(`w:left="${twip(ml)}"`);
         if (mr > 0) ind.push(`w:right="${twip(mr)}"`);
-        if (ti > 0) ind.push(`w:firstLine="${twip(ti)}"`);
+        if (ti > 0 || (own && !ti)) ind.push(`w:firstLine="${twip(ti)}"`);
         else if (ti < 0) ind.push(`w:hanging="${twip(-ti)}"`);
         if (ind.length) p.push(`<w:ind ${ind.join(' ')}/>`);
       }
@@ -592,9 +630,10 @@
     const heading = (k, id, name, lvl) => {
       const s = S[k];
       const hp = Math.round(s.size * 2);
+      const numPr = headNum && headNum[lvl] ? `<w:numPr><w:ilvl w:val="${lvl}"/><w:numId w:val="${headNumId}"/></w:numPr>` : '';
       return (
         `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>` +
-        `<w:pPr><w:keepNext/><w:keepLines/>${spacingX(s)}${jcX(s, S.p.align)}<w:outlineLvl w:val="${lvl}"/></w:pPr>` +
+        `<w:pPr><w:keepNext/><w:keepLines/>${numPr}${spacingX(s)}${jcX(s, S.p.align)}<w:outlineLvl w:val="${lvl}"/></w:pPr>` +
         `<w:rPr>${s.font.toLowerCase() !== S.p.font.toLowerCase() ? rFontsX(s.font) : ''}${onOffX('b', s.bold, S.p.bold)}${onOffX('i', s.italic, S.p.italic)}` +
         `${s.color !== S.p.color ? `<w:color w:val="${hexUp(s.color)}"/>` : ''}<w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/></w:rPr></w:style>`
       );

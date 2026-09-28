@@ -82,6 +82,14 @@
   <div class="group">
     <button class="tb" data-cmd="insertUnorderedList" data-icon="list" title="Madde işaretleri (Ctrl+Shift+L)"></button>
     <button class="tb" data-cmd="insertOrderedList" data-icon="listOrdered" title="Numaralandırma"></button>
+    <select id="headingNum" title="Başlık numaralandırması (Word: Çok Düzeyli Liste): Başlık 1–3 kendiliğinden numaralanır; başlık eklenince, silinince ya da taşınınca numaralar güncellenir">
+      <option value="">Başlık no. yok</option>
+      <option value="1.">1. / 1.1. / 1.1.1.</option>
+      <option value="1">1 / 1.1 / 1.1.1</option>
+      <option value="I.">I. / A. / 1.</option>
+      <option disabled>──────────</option>
+      <option value="skip">Bu başlığı numaralandırma</option>
+    </select>
     <button class="tb" data-cmd="outdent" data-icon="outdent" title="Girintiyi azalt (Ctrl+Shift+M)"></button>
     <button class="tb" data-cmd="indent" data-icon="indent" title="Girintiyi artır (Ctrl+M)"></button>
   </div>
@@ -172,6 +180,7 @@
 </div>
 
 <div class="ruler chrome" id="ruler">
+  <div class="ruler-tabtype l" id="rulerTabType" title="Sekme türü: Sola (tıklayınca değişir: sola, ortaya, sağa, ondalık). Cetvele tıklayınca bu türde durak konur; durağı sürükleyerek taşıyın, cetvelin dışına sürükleyerek kaldırın; çift tık: Sekmeler"><i></i></div>
   <div class="ruler-page" id="rulerPage">
     <div class="rm first" data-rm="first" title="İlk satır girintisi"></div>
     <div class="rm hang" data-rm="hang" title="Asılı girinti"></div>
@@ -196,7 +205,7 @@
 
 <footer class="statusbar chrome">
   <span id="stPage">Sayfa 1 / 1</span>
-  <span id="stWords">0 kelime</span>
+  <button class="st-btn" id="stWords" title="Sözcük sayısı: metin seçiliyken seçili / toplam. Tıklayın: sayfa, karakter, paragraf ve satır sayısı (Ctrl+Shift+G)">0 sözcük</button>
   <span id="stHint" class="hint"></span>
   <span class="spacer"></span>
   <label class="st-toggle" title="Diğer nesnelere, kenar boşluklarına ve sayfa ortasına yapış (sürüklerken Alt ile geçici kapatılır)"><input type="checkbox" id="optSnap" checked><span data-icon="magnet"></span>Kılavuzlar</label>
@@ -305,8 +314,31 @@
     </fieldset>
     <p class="hint-text" id="paraListNote" hidden>Liste maddelerinde girinti liste düzeyine göre belirlenir.</p>
     <div class="actions">
+      <button type="button" class="btn" id="paraTabs" title="Özel sekme durakları (sola, ortaya, sağa, ondalık)">Sekmeler…</button>
+      <span class="grow"></span>
       <button type="button" value="cancel" class="btn">Vazgeç</button>
       <button value="ok" class="btn primary" formnovalidate>Uygula</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="tabsDialog" class="dialog">
+  <form method="dialog">
+    <h2>Sekmeler</h2>
+    <div class="row">
+      <label>Sekme durağı konumu (cm)<input name="pos" inputmode="decimal" autocomplete="off"></label>
+      <label>Hizalama<select name="type"><option value="l">Sola</option><option value="c">Ortaya</option><option value="r">Sağa</option><option value="d">Ondalık</option></select></label>
+      <label>Dolgu<select name="leader"><option value="">(yok)</option><option value=".">. . . . . .</option><option value="-">- - - - - -</option><option value="_">______</option></select></label>
+    </div>
+    <label>Konulan duraklar<select name="list" size="5" class="tab-list"></select></label>
+    <p class="hint-text">Konumlar metin alanının sol kenarından ölçülür. Son duraktan sonra varsayılan duraklar her 1,27 cm'de.</p>
+    <div class="actions">
+      <button type="button" class="btn" id="tabSet" title="Yazılan konumda durağı koy ya da değiştir">Ayarla</button>
+      <button type="button" class="btn" id="tabClear" title="Seçili durağı kaldır">Temizle</button>
+      <button type="button" class="btn" id="tabClearAll">Tümünü temizle</button>
+      <span class="grow"></span>
+      <button type="button" value="cancel" class="btn">Vazgeç</button>
+      <button value="ok" class="btn primary" formnovalidate>Tamam</button>
     </div>
   </form>
 </dialog>
@@ -321,6 +353,25 @@
       <span class="grow"></span>
       <button type="button" value="cancel" class="btn">Vazgeç</button>
       <button value="ok" class="btn primary">Uygula</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="wordsDialog" class="dialog">
+  <form method="dialog">
+    <h2>Sözcük sayısı</h2>
+    <p class="hint-text" id="wcScope">Belgenin tamamı</p>
+    <table class="stats">
+      <tr><th>Sayfa</th><td id="wcPages"></td></tr>
+      <tr><th>Sözcük</th><td id="wcWords"></td></tr>
+      <tr><th>Karakter (boşluksuz)</th><td id="wcChars"></td></tr>
+      <tr><th>Karakter (boşluklu)</th><td id="wcCharsSp"></td></tr>
+      <tr><th>Paragraf</th><td id="wcParas"></td></tr>
+      <tr><th>Satır</th><td id="wcLines"></td></tr>
+    </table>
+    <p class="hint-text">Başlık ve liste numaraları, şekil yazıları ve üst/alt bilgi sayılmaz.</p>
+    <div class="actions">
+      <button value="ok" class="btn primary">Kapat</button>
     </div>
   </form>
 </dialog>

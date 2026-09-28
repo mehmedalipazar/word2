@@ -11,6 +11,7 @@
   const sizeText = $('fontSizeText');
   const blockSel = $('blockStyle');
   const lineHeightSel = $('lineHeight');
+  const headNumSel = $('headingNum');
 
   document.execCommand('defaultParagraphSeparator', false, 'p');
   document.execCommand('styleWithCSS', false, true);
@@ -257,7 +258,10 @@
     focusEditor();
     app.withoutBands(() => document.execCommand('formatBlock', false, tag));
     const pins = app.pinSelection();
-    selectedBlocks().forEach(dropWholeParagraphFont);
+    selectedBlocks().forEach((b) => {
+      dropWholeParagraphFont(b);
+      b.removeAttribute('data-num'); // stil uygulanınca stilin numarası gelir (numarasız başlık yeniden numaralanır)
+    });
     app.unpinSelection(pins);
     afterFormat();
   };
@@ -284,12 +288,7 @@
         extra.forEach((s) => s.replaceWith(...s.childNodes));
         app.unpinSelection(pins);
       }
-    } else
-      blocks.forEach((b) => {
-        const next = Math.max(0, (parseFloat(getComputedStyle(b).marginLeft) || 0) + dir * 48);
-        b.style.marginLeft = next ? next + 'px' : '';
-        if (!b.getAttribute('style')) b.removeAttribute('style');
-      });
+    } else blocks.forEach((b) => app.setIndent(b, 'marginLeft', Math.max(0, (parseFloat(getComputedStyle(b).marginLeft) || 0) + dir * 48)));
     afterFormat();
   };
 
@@ -314,6 +313,7 @@
       try { on = document.queryCommandState(cmd); } catch (_) { /* desteklenmiyor */ }
       if (btn) btn.classList.toggle('active', on);
     }
+    const N = syncHeadingNum();
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
     let n = sel.getRangeAt(0).startContainer;
@@ -326,6 +326,9 @@
     syncCombos();
     const block = n.closest('h1,h2,h3,p,li,div');
     blockSel.value = block && /^H[123]$/.test(block.tagName) ? block.tagName.toLowerCase() : 'p';
+    const skip = headNumSel.querySelector('[value="skip"]');
+    skip.disabled = !(N && block && /^H[123]$/.test(block.tagName) && N[block.tagName[1] - 1]);
+    skip.text = !skip.disabled && block.getAttribute('data-num') === '0' ? 'Bu başlığı numaralandır' : 'Bu başlığı numaralandırma';
     if (block) {
       const bcs = getComputedStyle(block);
       lineHeightSel.querySelector('[value="before"]').text = parseFloat(bcs.marginTop) > 0.5 ? 'Paragraftan önce boşluğu kaldır' : 'Paragraftan önce boşluk ekle';
@@ -341,6 +344,15 @@
     }
   }
   app.updateToolbarState = updateToolbarState;
+  // Belgenin başlık numaralandırması: hazır biçimlerden değilse (ör. Word'den gelen) örneğiyle gösterilir
+  function syncHeadingNum() {
+    const N = app.state.styles.num;
+    const preset = N ? Object.keys(app.HEADING_NUMS).find((k) => JSON.stringify(app.HEADING_NUMS[k]) === JSON.stringify(N)) : '';
+    const sample = app.numSample(N);
+    setSelectValue(headNumSel, preset ?? '~' + sample, sample);
+    return N;
+  }
+  app.onStyles = syncHeadingNum; // stiller değişince (açma, geri alma): core.js applyStyles
 
   // ---------- Köprü (Ctrl+K) ----------
   // Yalnızca http, https ve mailto adresleri kabul edilir (yapıştırılan ya da dosyadan gelen diğerleri düz metin olur).
@@ -495,8 +507,11 @@
     if (/^[\d.]+$/.test(r)) paraForm.lineVal.value = trNum(r);
     else if (r === 'atLeast' && numOf(paraForm.lineVal.value) < 6) paraForm.lineVal.value = '12';
   });
+  // "Sekmeler…": Word'deki gibi paragraf ayarları uygulanır, ardından Sekmeler penceresi açılır
+  $('paraTabs').addEventListener('click', () => paraDlg.close('tabs'));
   paraDlg.addEventListener('close', () => {
-    if (paraDlg.returnValue !== 'ok' || !paraShown) return;
+    if (paraDlg.returnValue === 'tabs') setTimeout(() => app.tabsDialog(), 0);
+    if (!/^(ok|tabs)$/.test(paraDlg.returnValue) || !paraShown) return;
     const f = paraForm;
     const changed = (...ks) => ks.some((k) => String(f[k].value) !== paraShown[k]);
     focusEditor();
@@ -507,9 +522,9 @@
         const by = numOf(f.by.value) || 0;
         // Asılı girintide ilk satır kenar boşluğunun dışına taşmasın (Word'de Ctrl+T gibi: sol = asılı)
         if (f.special.value === 'hanging' && left < by) left = by;
-        if (changed('left') || (f.special.value === 'hanging' && changed('special', 'by'))) b.style.marginLeft = left > 0 ? U.cmToPx(left) + 'px' : '';
-        if (changed('right')) b.style.marginRight = numOf(f.right.value) > 0 ? U.cmToPx(numOf(f.right.value)) + 'px' : '';
-        if (changed('special', 'by')) b.style.textIndent = f.special.value === 'none' || !by ? '' : (f.special.value === 'hanging' ? -1 : 1) * U.cmToPx(by) + 'px';
+        if (changed('left') || (f.special.value === 'hanging' && changed('special', 'by'))) app.setIndent(b, 'marginLeft', U.cmToPx(Math.max(0, left)));
+        if (changed('right')) app.setIndent(b, 'marginRight', U.cmToPx(Math.max(0, numOf(f.right.value) || 0)));
+        if (changed('special', 'by')) app.setIndent(b, 'textIndent', f.special.value === 'none' ? 0 : (f.special.value === 'hanging' ? -1 : 1) * U.cmToPx(by));
       }
       if (changed('before') && numOf(f.before.value) !== null) b.style.marginTop = numOf(f.before.value) + 'pt';
       if (changed('after') && numOf(f.after.value) !== null) b.style.marginBottom = numOf(f.after.value) + 'pt';
@@ -523,6 +538,78 @@
     }
     paraShown = null;
     afterFormat();
+  });
+
+  // ---------- Sekmeler penceresi (Word: Paragraf > Sekmeler) ----------
+  // Seçili paragrafların özel sekme durakları (core.js: data-tabs). Ayarla: yazılan konumda durak (varsa değiştirir);
+  // Temizle: seçili durak; Tamam: yazılı konum da ayarlanır (Word gibi) ve duraklar seçili paragraflara uygulanır.
+  const tabsDlg = $('tabsDialog');
+  const tabsForm = tabsDlg.querySelector('form').elements;
+  const TAB_NAMES = { l: 'Sola', c: 'Ortaya', r: 'Sağa', d: 'Ondalık' };
+  const LEAD_NAMES = { '': '', '.': ', dolgu . . .', '-': ', dolgu - - -', _: ', dolgu ___' };
+  let tabsWork = null;
+  const cmOf = (px) => trNum(SS.round(U.pxToCm(px), 2));
+  function fillTabs(sel) {
+    tabsForm.list.replaceChildren(...tabsWork.map((t, i) => new Option(`${cmOf(t.pos)} cm · ${TAB_NAMES[t.type]}${LEAD_NAMES[t.leader]}`, i)));
+    if (sel !== undefined) tabsForm.list.value = String(sel);
+  }
+  function setTabFromFields() {
+    const v = numOf(tabsForm.pos.value);
+    if (v === null || v < 0 || v > 55) return false;
+    const pos = SS.round(U.cmToPx(v), 2);
+    tabsWork = tabsWork.filter((t) => Math.abs(t.pos - pos) > 0.5);
+    tabsWork.push({ type: tabsForm.type.value, pos, leader: tabsForm.leader.value });
+    tabsWork.sort((a, b) => a.pos - b.pos);
+    fillTabs(tabsWork.findIndex((t) => t.pos === pos));
+    return true;
+  }
+  app.tabsDialog = function () {
+    focusEditor();
+    const blocks = selectedBlocks().filter((b) => !b.classList.contains('pb'));
+    if (!blocks.length) return;
+    tabsWork = app.parseTabs(blocks[0].dataset.tabs);
+    fillTabs();
+    tabsForm.pos.value = '';
+    tabsForm.type.value = 'l';
+    tabsForm.leader.value = '';
+    tabsDlg.returnValue = '';
+    tabsDlg.showModal();
+    tabsForm.pos.focus();
+  };
+  tabsForm.list.addEventListener('change', () => {
+    const t = tabsWork[+tabsForm.list.value];
+    if (!t) return;
+    tabsForm.pos.value = cmOf(t.pos);
+    tabsForm.type.value = t.type;
+    tabsForm.leader.value = t.leader;
+  });
+  $('tabSet').addEventListener('click', () => setTabFromFields() || SS.toast('Geçerli bir konum yazın (cm, ör. 8 ya da 12,5).'));
+  $('tabClear').addEventListener('click', () => {
+    let i = +tabsForm.list.value;
+    if (!(i >= 0)) i = tabsWork.findIndex((t) => cmOf(t.pos) === tabsForm.pos.value.trim());
+    if (i < 0 || !tabsWork[i]) return;
+    tabsWork.splice(i, 1);
+    fillTabs();
+    tabsForm.pos.value = '';
+  });
+  $('tabClearAll').addEventListener('click', () => {
+    tabsWork = [];
+    fillTabs();
+  });
+  tabsDlg.addEventListener('close', () => {
+    const work = tabsWork;
+    if (tabsDlg.returnValue !== 'ok' || !work) return void (tabsWork = null);
+    if (tabsForm.pos.value.trim()) setTabFromFields(); // Word: Tamam yazılı konumu (ve türünü) de ayarlar
+    const val = app.formatTabs(tabsWork);
+    tabsWork = null;
+    focusEditor();
+    for (const b of selectedBlocks().filter((x) => !x.classList.contains('pb'))) {
+      if (val) b.dataset.tabs = val;
+      else b.removeAttribute('data-tabs');
+    }
+    app.normalizeBlocks(); // sekmeler span'a (core.js: wrapTabs)
+    afterFormat();
+    app.updateRuler && app.updateRuler();
   });
 
   // ---------- Stiller (Word: Giriş > Stiller > Değiştir) ----------
@@ -864,6 +951,20 @@
     const h = n && ed.contains(n) && n.closest('h1,h2,h3');
     blockSel.value = h ? h.tagName.toLowerCase() : 'p';
     app.styleDialog(blockSel.value);
+  });
+  // Başlık numaralandırması (Word: Çok Düzeyli Liste, Başlık 1–3'e bağlı): hazır biçim Başlık 1–3 stillerine
+  // uygulanır (core.js: styles.num). "Bu başlığı numaralandırma" seçili başlıkları numarasız yapar ya da yeniden
+  // numaralar (data-num="0"; Word: numId 0).
+  headNumSel.addEventListener('change', () => {
+    const v = headNumSel.value;
+    focusEditor();
+    if (v === 'skip') {
+      const heads = selectedBlocks().filter((b) => /^H[123]$/.test(b.tagName));
+      const off = heads.some((h) => h.getAttribute('data-num') !== '0');
+      heads.forEach((h) => (off ? h.setAttribute('data-num', '0') : h.removeAttribute('data-num')));
+      if (heads.length) afterFormat();
+    } else if (v === '' || app.HEADING_NUMS[v]) app.setStyles(app.cleanStyles({ ...app.state.styles, num: v ? app.HEADING_NUMS[v] : null }));
+    updateToolbarState();
   });
   lineHeightSel.addEventListener('change', () => {
     const v = lineHeightSel.value;
@@ -1223,8 +1324,10 @@
     sel.removeAllRanges();
     sel.addRange(r);
   }
-  // Girintiyi bir adım azalt: önce ilk satır girintisi kalkar, sonra sol girinti bir durak (1,27 cm) azalır
+  // Girintiyi bir adım azalt: önce ilk satır girintisi kalkar, sonra sol girinti bir durak (1,27 cm) azalır.
+  // Numaralı başlığın girintisi numaralandırmanındır: azaltılmaz
   function outdentBlock(block) {
+    if (app.isNumbered(block)) return false;
     const cs = getComputedStyle(block);
     if (parseFloat(cs.textIndent) > 0.5) block.style.textIndent = '';
     else if (parseFloat(cs.marginLeft) > 0.5) {
@@ -1238,6 +1341,7 @@
     const block = caretBlockAtStart();
     if (!block) return false;
     if (block.tagName === 'LI') unlistItem(block);
+    else if (app.isNumbered(block)) block.setAttribute('data-num', '0'); // Word gibi: numaralı başlıkta önce numara kalkar
     else if (!outdentBlock(block)) {
       const pb = pageBreakBefore(block);
       if (!pb) return false;
@@ -1322,6 +1426,30 @@
     if (FONTS.includes(fam)) out.fontFamily = fam;
   }
 
+  // Word'ün HTML panosundaki sekme durakları, ör. "tab-stops:center 226.8pt right dotted 453.6pt" → data-tabs
+  function wordTabStops(style) {
+    const m = /tab-stops:\s*([^;"]+)/i.exec(style || '');
+    if (!m) return '';
+    const TYPE = { left: 'l', center: 'c', right: 'r', decimal: 'd' };
+    const LEAD = { dotted: '.', dashed: '-', lined: '_', heavy: '_' };
+    const UNIT = { pt: 96 / 72, cm: 96 / 2.54, mm: 96 / 25.4, in: 96, px: 1 };
+    const out = [];
+    let type = 'l';
+    let leader = '';
+    for (const tok of m[1].trim().toLowerCase().split(/\s+/)) {
+      const len = /^(-?[\d.]+)(pt|cm|mm|in|px)$/.exec(tok);
+      if (TYPE[tok]) type = TYPE[tok];
+      else if (LEAD[tok]) leader = LEAD[tok];
+      else if (tok === 'list' || tok === 'bar') type = null; // liste ve çubuk durakları alınmaz
+      else if (len) {
+        if (type) out.push({ type, pos: +len[1] * UNIT[len[2]], leader });
+        type = 'l';
+        leader = '';
+      }
+    }
+    return out.length ? app.formatTabs(out) : '';
+  }
+
   function convertChildren(src, dst, ctx) {
     for (const n of [...src.childNodes]) convertNode(n, dst, ctx);
   }
@@ -1372,6 +1500,8 @@
       if (/^(left|center|right|justify)$/i.test(align || '')) el.style.textAlign = align.toLowerCase();
       // Word'ün paragraf ayarları (pt/cm birimli olanlar; web sayfalarının px değerleri alınmaz)
       const wordLen = (v) => /^-?[\d.]+(pt|cm|mm|in)$/.test(v || '');
+      const stops = wordTabStops(style); // Word'ün özel sekme durakları
+      if (stops) el.dataset.tabs = stops;
       if (!listy && el.tagName !== 'LI') {
         if (wordLen(st.textIndent)) el.style.textIndent = st.textIndent;
         if (wordLen(st.marginLeft) && parseFloat(st.marginLeft) > 0) el.style.marginLeft = st.marginLeft;
@@ -1388,6 +1518,8 @@
       dst.appendChild(el);
       return;
     }
+    const tabCount = /mso-tab-count:\s*(\d+)/i.exec(n.getAttribute('style') || '');
+    if (tabCount) return void dst.appendChild(document.createTextNode('\t'.repeat(Math.min(+tabCount[1], 20)))); // Word'ün sekmesi
     if (INLINE[tag]) {
       // Köprü korunur (yalnızca http/https/mailto); diğer bağlantılar düz metin olur
       const href = tag === 'A' && app.safeHref(n.getAttribute('href'));
@@ -1487,9 +1619,13 @@
         let part = null;
         const wasEmpty = !n.childNodes.length; // alt düğümler aşağıda taşınacağı için önceden bak
         const style = n.getAttribute('style');
+        const tabs = n.getAttribute('data-tabs');
+        const noNum = n.getAttribute('data-num') === '0';
         const newPart = () => {
           part = out.appendChild(document.createElement(n.tagName.toLowerCase()));
           if (style) part.setAttribute('style', style);
+          if (tabs) part.setAttribute('data-tabs', tabs);
+          if (noNum) part.setAttribute('data-num', '0');
           return part;
         };
         for (const c of [...n.childNodes]) {
@@ -1628,6 +1764,9 @@
       }
       const el = dst.appendChild(document.createElement(tag.toLowerCase()));
       if (n.getAttribute('style')) el.setAttribute('style', n.getAttribute('style'));
+      if (n.getAttribute('data-tabs')) el.setAttribute('data-tabs', app.formatTabs(app.parseTabs(n.getAttribute('data-tabs'))));
+      if (/^H[1-3]$/.test(tag) && n.getAttribute('data-num') === '0') el.setAttribute('data-num', '0'); // numarasız başlık
+      if (tag === 'SPAN' && n.classList.contains('tab')) el.className = 'tab';
       if (tag === 'OL' && +n.getAttribute('start') > 1) el.setAttribute('start', n.getAttribute('start'));
       if (tag === 'A' && app.safeHref && app.safeHref(n.getAttribute('href'))) el.setAttribute('href', app.safeHref(n.getAttribute('href')));
       cleanInternal(n, el);

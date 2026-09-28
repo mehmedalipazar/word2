@@ -44,7 +44,16 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   (tek, 1,5, çift, birden çok, en az); satır aralığı kutusunda "Paragraftan önce/sonra boşluk ekle/kaldır"
 - **Cetvel**: imlecin paragrafının girintileri; ilk satır, asılı, sol ve sağ girinti işaretleri sürüklenir
   (0,25 cm'ye yapışır, Alt ile serbest)
-- Sekme durakları Word'deki gibi her 1,27 cm'de
+- **Sekme durakları**: sola, ortaya, sağa ve ondalık (virgülde hizalar) özel duraklar; dolgu `. . .`, `- - -`, `___`
+  (içindekiler satırı gibi). Cetvelin solundaki kutu durağın türünü seçer, cetvele tıklamak seçili paragraflara durak
+  koyar; durak sürüklenerek taşınır, cetvelin dışına sürüklenince kalkar, çift tık **Sekmeler** penceresini açar
+  (Paragraf penceresinde de "Sekmeler…"). Son durağın ötesinde Word'deki gibi her 1,27 cm'de bir durak vardır.
+  Resmî yazıdaki "Sayı … ⇥ Tarih" (sağa durak) ve ortalı imza bloğu Word'den böyle gelir, Word'e böyle gider.
+- **Başlık numaralandırması** (liste düğmelerinin yanındaki kutu; Word'ün Çok Düzeyli Liste'si): "1. / 1.1. / 1.1.1.",
+  "1 / 1.1 / 1.1.1" ya da "I. / A. / 1." Başlık 1–3'e bağlanır. Numara metne yazılmaz: başlık eklenince, silinince ya
+  da taşınınca kendiliğinden güncellenir. "Bu başlığı numaralandırma" seçili başlığı numarasız yapar (Önsöz,
+  Kaynaklar…); numaralı başlığın başında Backspace de önce numarayı kaldırır. Word'ün başlık stillerine bağlı ya da
+  başlıklara verilmiş numaraları böyle açılır, Word'e başlık stillerine bağlı liste olarak gider.
 - Listeler Word'ün asılı girintisiyle (işaret 0,63 cm, metin 1,27 cm; alt düzeyler 1,27 cm içeride, •/o/▪ ve 1./a./i.);
   maddenin başında Backspace önce işareti kaldırır (metin yerinde kalır), numara sonraki maddelerde sürer.
   Liste düğmesiyle kaldırılan her madde ayrı paragraf olur; seçilmeyen maddeler liste olarak kalır ve yeniden numaralanır.
@@ -67,11 +76,13 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   kendiliğinden güncellenir (Şekil, Harita, Fotoğraf, Grafik… her etiket ayrı sayılır); resmin altında ya da üstünde
 - **Sayfa sonu** (Ctrl+Enter): sonraki metin yeni sayfadan başlar; liste maddesinde listeyi böler (numara sürer)
 - Tek geri alma geçmişi (metin + resim işlemleri birlikte)
+- **Sözcük sayısı**: durum çubuğunda; metin seçiliyken "seçili / toplam" (ör. "7 / 1.250 sözcük"). Sayıya tıklamak
+  (ya da Ctrl+Shift+G) sayfa, sözcük, karakter (boşluklu/boşluksuz), paragraf ve satır sayısını gösterir.
 - Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
   son yazılanlar da korunur; kaydedilmemiş değişiklik varken kapatma/yenilemede tarayıcı uyarır. Kapanan sekmenin
   belgesi, sonra açılan yeni sekmede geri gelir.
 - **Word belgesi açma (.docx)**: metin, başlıklar (numaralarıyla), biçimler, listeler (düzeyleriyle; araya paragraf girse
-  de numara sürer), satır aralıkları, girintiler, sayfa ayarları, üst/alt bilgi (metin ve sayfa numarası), resimler
+  de numara sürer), satır aralıkları, girintiler, sekme durakları, sayfa ayarları, üst/alt bilgi (metin ve sayfa numarası), resimler
   (kırpma/döndürme/metin kaydırma dahil). Resmin hemen altındaki "Şekil 3. …" paragrafı ya da resimle gruplanmış
   yazı kutusu, o resmin şekil yazısı olarak gelir. "Aç" düğmesiyle ya da dosyayı sayfaya sürükleyerek.
 - **Word'e aktar (.docx)**: resimler sayfaya göre mutlak konumla yazılır; çapa, resmin sayfasında başlayan bir
@@ -99,6 +110,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 | Ctrl+1 / Ctrl+5 / Ctrl+2 | Satır aralığı tek / 1,5 / çift |
 | Ctrl+M / Ctrl+Shift+M | Girintiyi artır / azalt |
 | Ctrl+Shift+L | Madde işaretleri |
+| Ctrl+Shift+G | Sözcük sayısı |
 | Tab | Metnin içinde sekme; maddenin başında alt düzeye in; birden çok paragraf seçiliyse girinti |
 | Shift+Tab | Maddede üst düzeye çık; paragrafın başında girintiyi azalt |
 | Oklar (Shift: 10 px) | Seçili resmi ince ayarla kaydır |
@@ -116,12 +128,12 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 | `js/core.js` | Durum, sayfa geometrisi, metin akış şeritleri, geri alma, dosya biçimi |
 | `js/text.js` | Biçimlendirme komutları, paragraf penceresi, köprüler, pano, Word/web yapıştırma temizliği |
 | `js/find.js` | Bul ve değiştir |
-| `js/ruler.js` | Cetvel (girinti işaretleri) |
+| `js/ruler.js` | Cetvel (girinti işaretleri, sekme durakları) |
 | `js/objects.js` | Resim seçimi, sürükleme, boyut/döndürme, kırpma, kılavuzlar, hizalama, pano |
 | `js/docx.js` | Word (.docx) dışa aktarma |
 | `js/docximport.js` | Word (.docx) içe aktarma |
 | `js/zip.js` | Bağımlılıksız ZIP yazıcı |
-| `js/main.js` | Düğmeler, kısayollar, yakınlaştırma, sayfa yapısı, yazdırma, otomatik kayıt |
+| `js/main.js` | Düğmeler, kısayollar, yakınlaştırma, sayfa yapısı, yazdırma, otomatik kayıt, sözcük sayısı |
 
 ## Bilinen sınırlamalar
 
@@ -129,9 +141,11 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   dipnotlar, grafikler ve EMF/WMF biçimli resimler alınamaz (açılışta kaç tanesinin atlandığı gösterilir).
 - Üst/alt bilgi tek satır düz metindir (biçim, resim, tablo, tek/çift sayfa ayrımı yok); Word'den yalnızca ilk dolu
   satırı alınır, kalanı açılışta bildirilir.
-- Cetvelde sekme durağı yoktur. Word'deki özel sekme durakları alınmaz (varsayılan 1,27 cm durakları geçerlidir).
+- Çubuk sekme durağı ve belgeye özgü varsayılan durak aralığı yoktur (varsayılan duraklar her 1,27 cm'de).
   Word'ün "Tam" satır aralığı "En az" olarak alınır.
-- Çok düzeyli listelerde numaralar düzey başına ayrıdır (1., a., i.); Word'deki "1.1." gibi birleşik numaralar yoktur.
+- Çok düzeyli listelerde numaralar düzey başına ayrıdır (1., a., i.); "1.1." gibi birleşik numaralar yalnızca başlık
+  numaralandırmasında vardır. Başlık numaralandırması üç düzeylidir (Word'ün Başlık 4–9'u Başlık 3 olur, numarası metne
+  yazılır); Word'de ortada yeniden başlatılmış başlık numaraları editöre metin olarak gelir.
 - Eski `.doc` biçimi açılamaz; Word'de ".docx" olarak kaydedin.
 - Köprüler yalnızca web (`http`, `https`) ve e-posta (`mailto`) adresleri içindir; belge içi (yer imi) köprüler yok,
   Word'den gelenlerin yalnızca metni alınır.

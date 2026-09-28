@@ -91,6 +91,7 @@ select {
 .combo input:focus { outline: none; }
 .combo:focus-within select { border-color: var(--accent); }
 #lineHeight { width: 62px; margin-left: 4px; }
+#headingNum { width: 112px; margin: 0 2px; }
 
 .color-tb { flex-direction: column; gap: 0; padding-top: 3px; }
 .color-tb .letter { font-weight: 700; font-size: 15px; line-height: 16px; font-family: Georgia, serif; }
@@ -124,6 +125,24 @@ select {
 .rm.right { bottom: -3px; height: 8px; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .ruler-page.off .rm { display: none; }
 .ruler-page.list .rm { opacity: .35; cursor: default; }
+/* Sekme durakları (ruler.js): └ sola, ┴ ortaya, ┘ sağa, ┴• ondalık; soldaki kutu konacak durağın türü */
+.rt { position: absolute; bottom: 1px; width: 8px; height: 7px; margin-left: -1px; border: 0 solid #111; cursor: ew-resize; }
+.rt.l { border-left-width: 2px; border-bottom-width: 2px; }
+.rt.r { border-right-width: 2px; border-bottom-width: 2px; margin-left: -7px; }
+.rt.c, .rt.d { border-bottom-width: 2px; width: 10px; margin-left: -5px; }
+.rt.c::before, .rt.d::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; background: #111; }
+.rt.d::after { content: ""; position: absolute; left: 7px; top: 1px; width: 2px; height: 2px; background: #111; }
+.ruler-page.off .rt { display: none; }
+.ruler-tabtype {
+  position: absolute; left: 6px; top: 3px; width: 16px; height: 16px; border: 1px solid #cfd4dc; border-radius: 3px;
+  background: #fff; cursor: pointer;
+}
+.ruler-tabtype > i { position: absolute; left: 4px; top: 3px; width: 7px; height: 7px; border: 0 solid #111; }
+.ruler-tabtype.l > i { border-left-width: 2px; border-bottom-width: 2px; }
+.ruler-tabtype.r > i { border-right-width: 2px; border-bottom-width: 2px; }
+.ruler-tabtype.c > i, .ruler-tabtype.d > i { border-bottom-width: 2px; width: 8px; left: 3px; }
+.ruler-tabtype.c > i::before, .ruler-tabtype.d > i::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: #111; }
+.ruler-tabtype.d > i::after { content: ""; position: absolute; left: 6px; top: 1px; width: 2px; height: 2px; background: #111; }
 
 /* ---------- Çalışma alanı ---------- */
 .workspace { flex: 1; overflow: auto; position: relative; }
@@ -217,6 +236,11 @@ select {
 .editor :is(ul, ol) :is(ul, ol) ol > li::marker { content: counter(list-item, lower-roman) ".\9"; }
 .editor li > p { display: inline; margin: 0; }
 .editor .el::before { content: "\a0"; } /* boş satırlar da sayfa aralarından kaçsın (core.js: markEmptyLines) */
+/* Özel sekme durakları (core.js: fitTabs): sekme karakteri sıfır genişlikte, genişliği padding-left; dolgular */
+.editor [data-tabs] .tab { tab-size: 0; }
+.editor [data-tabs] .tab.lead-dot { background: radial-gradient(circle, currentColor 0.06em, transparent 0.09em) left calc(100% - 0.2em) / 0.3em 0.3em repeat-x; }
+.editor [data-tabs] .tab.lead-hyphen { background: repeating-linear-gradient(to right, currentColor 0 0.3em, transparent 0.3em 0.5em) left 62% / 100% 0.07em no-repeat; }
+.editor [data-tabs] .tab.lead-line { background: linear-gradient(currentColor, currentColor) left calc(100% - 0.12em) / 100% 0.07em no-repeat; }
 /* Köprü: Word'ün Köprü stili (docx.js: Hyperlink); Ctrl+tık ile açılır (text.js) */
 .editor a { color: #0563c1; text-decoration: underline; cursor: text; }
 /* Biçim boyacısı kipi (text.js): fırça imleci */
@@ -295,6 +319,8 @@ select {
 .statusbar .spacer { flex: 1; }
 .statusbar .hint { color: var(--accent); }
 .st-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+.st-btn { border: 0; background: transparent; color: inherit; padding: 2px 4px; margin: 0 -4px; border-radius: 4px; cursor: pointer; }
+.st-btn:hover { background: var(--bg); color: var(--text); }
 .st-toggle svg.ic { width: 14px; height: 14px; }
 .zoom { display: inline-flex; align-items: center; gap: 2px; }
 .zoom-val { border: 0; background: transparent; cursor: pointer; min-width: 46px; color: var(--text); }
@@ -319,6 +345,10 @@ select {
 .dialog .hint-text { margin: 0; font-size: 12px; color: var(--muted); }
 .dialog .actions .grow { flex: 1; }
 .dialog .span2 { grid-column: span 2; }
+.dialog .tab-list { height: auto; font-variant-numeric: tabular-nums; }
+.dialog .stats { border-collapse: collapse; font-size: 13px; }
+.dialog .stats th { text-align: left; font-weight: normal; color: var(--muted); padding: 3px 32px 3px 0; }
+.dialog .stats td { text-align: right; font-variant-numeric: tabular-nums; }
 .dialog input[type=color] { height: 30px; width: 100%; padding: 1px 2px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .style-preview {
   border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; height: 56px; overflow: hidden;

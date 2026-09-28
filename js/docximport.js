@@ -1,5 +1,6 @@
 /* Word (.docx) içe aktarma.
- * Metin, başlıklar (numaralarıyla), biçimler, listeler, satır aralıkları, sayfa ayarları ve resimler alınır.
+ * Metin, başlıklar, biçimler, listeler, sekme durakları, satır aralıkları, sayfa ayarları ve resimler alınır.
+ * - Başlık stillerine bağlı numaralar (1. / 1.1.) editörün başlık numaralandırması olur (headingNumbering).
  * - Satır içi resimler Word'deki satırlarına sabitlenir (metin üstünden/altından akar).
  * - Yüzen resimler Word'deki konum ve metin kaydırma ayarlarıyla gelir; kırpma ve döndürme korunur.
  * - Resmin hemen altındaki/üstündeki "Şekil 3. ..." paragrafı ya da gruptaki yazı kutusu, o resmin
@@ -179,6 +180,7 @@
     return s;
   };
   function fmtNum(n, fmt) {
+    if (fmt === 'decimalZero') return String(n).padStart(2, '0');
     if (fmt === 'lowerLetter') return letter(n);
     if (fmt === 'upperLetter') return letter(n).toUpperCase();
     if (fmt === 'lowerRoman') return roman(n);
@@ -186,7 +188,8 @@
     return String(n);
   }
 
-  // Word'ün liste sayaçlarını taklit eder: numaralı başlıkların ("1.2 Amaç") numarasını metne yazmak için
+  // Word'ün liste sayaçlarını taklit eder: numaralı başlıkların ("1.2 Amaç") numarası (başlık numaralandırması
+  // editöre alınamazsa metne yazılır) ve Word'deki değerle karşılaştırmak için
   function parseNumbering(doc) {
     const abs = new Map();
     const nums = new Map();
@@ -195,11 +198,16 @@
       for (const l of kids(a, W, 'lvl')) {
         const ind = kid(kid(l, W, 'pPr'), W, 'ind');
         const left = ind && (wa(ind, 'left') ?? wa(ind, 'start'));
+        const hang = ind && wa(ind, 'hanging');
+        const first = ind && wa(ind, 'firstLine');
         lv.set(+wa(l, 'ilvl'), {
           fmt: wa(kid(l, W, 'numFmt'), 'val') || 'decimal',
           text: wa(kid(l, W, 'lvlText'), 'val') || '',
           start: +(wa(kid(l, W, 'start'), 'val') || 1),
           left: left !== null && left !== undefined ? +left / 20 : null, // pt
+          hang: hang ? +hang / 20 : first ? -first / 20 : 0, // pt (eksi: ilk satır girintisi)
+          suff: wa(kid(l, W, 'suff'), 'val') || 'tab',
+          lgl: !!kid(l, W, 'isLgl') && onOff(kid(l, W, 'isLgl')),
         });
       }
       abs.set(wa(a, 'abstractNumId'), lv);
@@ -228,6 +236,12 @@
         const c = counters.get(nums.get(numId)?.abs);
         return (c && c[ilvl]) || 1;
       },
+      // Düzeyin tanımı ve bağlı olduğu liste (abstractNum); start, numaranın ilk kullanımdaki başlangıç değeri
+      level(numId, ilvl) {
+        const n = nums.get(numId);
+        const L = n && abs.get(n.abs) && abs.get(n.abs).get(ilvl);
+        return L ? { ...L, abs: n.abs, start: n.starts.has(ilvl) ? n.starts.get(ilvl) : L.start } : null;
+      },
       next(numId, ilvl) {
         const n = nums.get(numId);
         const lv = n && abs.get(n.abs);
@@ -242,10 +256,11 @@
         c[ilvl] = (c[ilvl] === undefined ? L.start - 1 : c[ilvl]) + 1;
         for (let i = ilvl + 1; i < 9; i++) c[i] = undefined; // alt seviyeler baştan başlar
         if (L.fmt === 'bullet' || L.fmt === 'none') return '';
+        // Atlanan üst düzey Word'de 0 görünür (ör. Başlık 1'den hemen sonra Başlık 3: "1.0.1")
         return L.text.replace(/%([1-9])/g, (_, d) => {
           const i = +d - 1;
           const li = lv.get(i) || { fmt: 'decimal', start: 1 };
-          return fmtNum(c[i] === undefined ? li.start : c[i], li.fmt);
+          return fmtNum(c[i] === undefined ? li.start - 1 : c[i], L.lgl ? 'decimal' : li.fmt);
         });
       },
     };
@@ -330,6 +345,22 @@
         }
         case 'outlineLvl': o.outline = +wa(c, 'val'); break;
         case 'pageBreakBefore': o.pbBefore = onOff(c); break;
+        case 'tabs': {
+          // Özel sekme durakları: stil zincirindekilere paragrafınkiler eklenir, "clear" olanı kaldırır (kopya üzerinde)
+          const TYPE = { left: 'l', start: 'l', center: 'c', right: 'r', end: 'r', decimal: 'd' };
+          const LEAD = { dot: '.', middleDot: '.', hyphen: '-', underscore: '_', heavy: '_' };
+          const tabs = (o.tabs || []).slice();
+          for (const t of kids(c, W, 'tab')) {
+            const pos = +wa(t, 'pos') / 15; // twip → px
+            const v = wa(t, 'val');
+            if (!isFinite(pos)) continue;
+            const i = tabs.findIndex((x) => Math.abs(x.pos - pos) < 0.5);
+            if (i >= 0) tabs.splice(i, 1);
+            if (TYPE[v]) tabs.push({ type: TYPE[v], pos, leader: LEAD[wa(t, 'leader')] || '' });
+          }
+          o.tabs = tabs;
+          break;
+        }
         default:
       }
     }
@@ -339,7 +370,7 @@
   // Word'ün stilleri → belgenin stilleri (core.js: state.styles). Normal = docDefaults + varsayılan paragraf stili;
   // Başlık 1–3 = "heading 1–3" stilleri (belgede yoksa yerleşik olan). "En az"/"Tam" satır aralıklı stil 1 satır
   // sayılır; o paragraflara aralık satır içi yazılır (paraCSS).
-  function importStyles(ctx) {
+  function importStyles(ctx, num) {
     const def = app.builtinStyles();
     const JCMAP = { center: 'center', right: 'right', end: 'right', both: 'justify', distribute: 'justify' };
     const conv = (id) => {
@@ -361,6 +392,7 @@
       const id = ctx.styles.byName(n);
       out[k] = id ? conv(id) : def[k];
     }
+    out.num = num; // başlık numaralandırması (headingNumbering)
     return app.cleanStyles(out);
   }
   // Belgenin stilleri (bunlardan farklı olanlar satır içi stil olarak yazılır); lh: stilin CSS satır yüksekliği
@@ -409,18 +441,19 @@
     const ol = kid(pPr, W, 'outlineLvl');
     if (ol) heading = +wa(ol, 'val') < 9 ? +wa(ol, 'val') + 1 : 0;
     let list = null;
-    let numText = '';
+    let hnum = null;
     if (pp.numId && pp.numId !== '0') {
       const ilvl = pp.ilvl || 0;
-      numText = ctx.numbering.next(pp.numId, ilvl);
+      const text = ctx.numbering.next(pp.numId, ilvl);
       const fmt = ctx.numbering.fmt(pp.numId, ilvl);
       // indent: görsel düzey için (renderBlocks); value: numaralı listenin bu maddedeki sayacı (start için)
       const lvLeft = ctx.numbering.left(pp.numId, ilvl);
       if (fmt && fmt !== 'none')
         list = { ordered: fmt !== 'bullet', ilvl, indent: pp.left !== undefined ? pp.left : lvLeft, value: ctx.numbering.count(pp.numId, ilvl) };
+      hnum = { numId: pp.numId, ilvl, text }; // başlığın numarası (headingNumbering)
     }
     const tag = heading ? 'h' + Math.min(heading, 3) : 'p';
-    return { pp, rb: { ...base.rb }, tag, list: heading ? null : list, numText: heading ? numText : '', caption: base.caption, sectPr: kid(pPr, W, 'sectPr') };
+    return { pp, rb: { ...base.rb }, tag, list: heading ? null : list, hnum: heading ? hnum : null, caption: base.caption, sectPr: kid(pPr, W, 'sectPr') };
   }
 
   // lineFont: satır yüksekliğini belirleyen yazı tipi (paragraftaki en büyük puntolu metnin)
@@ -434,9 +467,9 @@
       const mb = pp.after || 0;
       if (Math.abs(mt - d.mt) > 0.5) st.push(`margin-top: ${+mt.toFixed(1)}pt`);
       if (Math.abs(mb - d.mb) > 0.5) st.push(`margin-bottom: ${+mb.toFixed(1)}pt`);
-      if (pp.left > 0.5) st.push(`margin-left: ${+pp.left.toFixed(1)}pt`);
+      if (pp.left > 0.5 || pp.ownInd) st.push(`margin-left: ${+pp.left.toFixed(1)}pt`);
       if (pp.right > 0.5) st.push(`margin-right: ${+pp.right.toFixed(1)}pt`);
-      if (pp.first && Math.abs(pp.first) > 0.5) st.push(`text-indent: ${+pp.first.toFixed(1)}pt`);
+      if ((pp.first && Math.abs(pp.first) > 0.5) || pp.ownInd) st.push(`text-indent: ${+pp.first.toFixed(1)}pt`);
     }
     // Satır aralığı hiçbir yerde belirtilmemişse Word'de tek satırdır
     if (!pp.line || pp.lineRule === 'auto') {
@@ -751,11 +784,12 @@
     ctx.inInstr = false;
     ctx.fldHref = null;
     const boxes = (ctx.pendingBoxes = []);
-    if (info.numText) out.text(info.numText + ' ', info.rb);
     walkInline(p, ctx, out, info.rb);
     const res = [];
     if (info.pp.pbBefore) res.push({ type: 'pb' });
-    const mk = (parts) => ({ type: 'p', tag: info.tag, list: info.list, rb: info.rb, pp: info.pp, parts, caption: info.caption });
+    // Başlığın numarası ilk parçada; sayfa sonuyla bölünen başlığın sonraki parçaları numarasız (hcont)
+    const mk = (parts) => ({ type: 'p', tag: info.tag, list: info.list, rb: info.rb, pp: info.pp, parts, caption: info.caption,
+      hnum: info.hnum, hcont: res.some((b) => b.type === 'p') });
     let cur = [];
     const hasContent = (parts) => parts.some((x) => x.t !== 'br');
     for (const part of out.parts) {
@@ -849,6 +883,79 @@
     return blocks.filter((b) => !b.used);
   }
 
+  // Başlık numaralandırması (core.js: styles.num). Liste, Başlık 1–3 stillerine bağlı olan (Word'ün başlık
+  // numaralandırması); stiller numarasızsa başlıklara tek tek verilmiş olanların en çoğu. Başlık k o listenin k-1.
+  // düzeyindeyse numarası editörün sayacıyla çizilir (metne yazılmaz); o düzeyin numarasız başlığı (numId 0, başka
+  // liste) data-num="0" olur. Sayaçla bulunan numaralardan biri Word'dekinden farklıysa (ör. ortada yeniden başlatılan
+  // numara) ya da biçim desteklenmiyorsa numaralar eskisi gibi metne yazılır.
+  function headingNumbering(blocks, ctx) {
+    const heads = blocks.filter((b) => b.type === 'p' && /^h[1-3]$/.test(b.tag));
+    const lvlOf = (b) => (b.hnum && !b.hcont && b.hnum.ilvl === +b.tag[1] - 1 ? ctx.numbering.level(b.hnum.numId, b.hnum.ilvl) : null);
+    const styleLvl = [0, 1, 2].map((i) => {
+      const id = ctx.styles.byName('heading ' + (i + 1));
+      const pp = id && styleBase(ctx, id).pp;
+      return pp && pp.numId && pp.numId !== '0' && (pp.ilvl || 0) === i ? ctx.numbering.level(pp.numId, i) : null;
+    });
+    let dom = (styleLvl.find(Boolean) || {}).abs ?? null;
+    if (dom === null) {
+      const count = new Map();
+      for (const b of heads) {
+        const L = lvlOf(b);
+        if (L) count.set(L.abs, (count.get(L.abs) || 0) + 1);
+      }
+      count.forEach((v, k) => (dom === null || v > count.get(dom)) && (dom = k));
+    }
+    // Düzeyin tanımı stilden (yoksa o düzeyin ilk numaralı başlığından); başlangıç değeri ilk numaralı başlığınki
+    // (Word'de "Numaralandırma değerini ayarla" yeni bir numId ile yazılır)
+    const raw = styleLvl.map((L) => (L && L.abs === dom ? L : null));
+    const seen = new Set();
+    for (const b of heads) {
+      const L = lvlOf(b);
+      const k = +b.tag[1] - 1;
+      if (!L || L.abs !== dom || seen.has(k)) continue;
+      seen.add(k);
+      raw[k] = { ...(raw[k] || L), start: L.start };
+    }
+    raw.forEach((L, k) => L && (raw[k] = { text: L.text, fmt: L.fmt, start: L.start, ind: L.left || 0, hang: L.hang, suff: L.suff, lgl: L.lgl }));
+    // Desteklenmeyen sayı biçimi (ör. madde işareti, "Birinci") varsa hiçbiri alınmaz; alt düzey sayacı kullanan
+    // düzey cleanStyles'ta düşer
+    const N = raw.every((L) => !L || (app.NUM_FMTS[L.fmt] && /^(tab|space|nothing)$/.test(L.suff))) ? app.cleanStyles({ num: raw }).num : null;
+    const auto = (b) => {
+      const L = lvlOf(b);
+      return !!(N && L && L.abs === dom && N[+b.tag[1] - 1]);
+    };
+    // Editörün sayaçlarıyla (core.js: headingNumCSS) bulunan numaralar Word'dekilerle aynı mı?
+    let ok = !!N;
+    const c = (N || []).map((L) => (L ? L.start - 1 : 0));
+    for (const b of ok ? heads : []) {
+      if (!auto(b)) continue;
+      const k = +b.tag[1] - 1;
+      c[k]++;
+      for (let j = k + 1; j < 3; j++) c[j] = N[j] ? N[j].start - 1 : 0;
+      const L = N[k];
+      const text = L.text.replace(/%([1-3])/g, (_, d) => fmtNum(c[d - 1], L.lgl || !N[d - 1] ? 'decimal' : N[d - 1].fmt));
+      if (text !== b.hnum.text) ok = false;
+    }
+    for (const b of heads) {
+      if (ok && auto(b)) {
+        // Girinti numaralandırmadan gelir; stilde ya da paragrafta başkası verilmişse o (0 da olsa) yazılır
+        const L = N[+b.tag[1] - 1];
+        const same = (v, d) => v === undefined || Math.abs(v - d) < 0.5;
+        if (same(b.pp.left, L.ind) && same(b.pp.first, -L.hang)) b.pp = { ...b.pp, left: undefined, first: undefined };
+        else b.pp = { ...b.pp, left: b.pp.left ?? L.ind, first: b.pp.first ?? -L.hang, ownInd: true };
+        continue;
+      }
+      if (ok && N[+b.tag[1] - 1]) b.noNum = true;
+      // Numara metne: Word'deki gibi numarayla metin arasında boşluk
+      if (b.hnum && !b.hcont && b.hnum.text) {
+        const out = makePara();
+        out.text(b.hnum.text + ' ', b.rb);
+        b.parts = [...out.parts, ...b.parts];
+      }
+    }
+    return ok ? N : null;
+  }
+
   // ---------- HTML üretimi ----------
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -917,6 +1024,8 @@
       const css = paraCSS(b.pp || {}, b.tag, lineFontOf(b, base), !!b.list);
       if (css) st.push(css);
       if (st.length) el.setAttribute('style', st.join('; '));
+      if (b.pp && b.pp.tabs && b.pp.tabs.length) el.setAttribute('data-tabs', app.formatTabs(b.pp.tabs)); // özel sekme durakları
+      if (b.noNum) el.setAttribute('data-num', '0'); // numaralı başlık düzeyinde numarasız başlık
     };
     for (const b of blocks) {
       if (b.type === 'pb') {
@@ -1267,7 +1376,7 @@
       report: { images: 0, captions: 0, tables: 0, textboxes: 0, charts: 0, other: 0, skipped: 0, unsupported: 0, notes: 0 },
     };
     const blocks = attachCaptions(walkBody(body, ctx), ctx);
-    const styles = importStyles(ctx);
+    const styles = importStyles(ctx, headingNumbering(blocks, ctx));
     TAG = tagFrom(styles);
     const html = renderBlocks(blocks);
     const sect = kid(body, W, 'sectPr');

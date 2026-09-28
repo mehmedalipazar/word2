@@ -46,29 +46,75 @@
     h1: { font: 'Calibri', size: 18, bold: true, italic: false, color: '#000000', align: 'left', before: 12, after: 6, line: L108 },
     h2: { font: 'Calibri', size: 14, bold: true, italic: false, color: '#000000', align: 'left', before: 10, after: 5, line: L108 },
     h3: { font: 'Calibri', size: 12, bold: true, italic: false, color: '#000000', align: 'left', before: 8, after: 4, line: L108 },
+    num: null,
   };
   app.STYLE_KEYS = ['p', 'h1', 'h2', 'h3'];
   app.STYLE_NAMES = { p: 'Normal', h1: 'Başlık 1', h2: 'Başlık 2', h3: 'Başlık 3' };
   app.builtinStyles = () => JSON.parse(JSON.stringify(BUILTIN_STYLES));
+  const inRange = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v) && v >= lo && v <= hi ? v : d);
+
+  // Başlık numaralandırması (Word: Çok Düzeyli Liste, Başlık 1–3'e bağlı): styles.num = null ya da
+  // [Başlık 1, Başlık 2, Başlık 3] düzeylerinin tanımı (numarasız düzey null). text: Word'ün lvlText'i (%1–%3: Başlık
+  // 1–3'ün sayacı), fmt: sayı biçimi, start: ilk değer, ind/hang: sol girinti ve asılı girinti (nk; hang < 0 ilk satır
+  // girintisi), suff: numaradan sonra sekme/boşluk/hiçbiri, lgl: bütün sayılar ondalık (Word: isLgl). Numara metne
+  // yazılmaz, CSS sayacıyla çizilir (applyStyles): başlık eklenince, silinince, taşınınca kendiliğinden güncellenir.
+  // data-num="0" olan başlık numarasızdır (Word: numId 0).
+  app.NUM_FMTS = { decimal: 'decimal', decimalZero: 'decimal-leading-zero', upperRoman: 'upper-roman', lowerRoman: 'lower-roman',
+    upperLetter: 'upper-alpha', lowerLetter: 'lower-alpha' };
+  const numLevel = (text, fmt, ind) => ({ text, fmt, start: 1, ind, hang: ind, suff: 'tab', lgl: false });
+  // Word'ün başlıklara bağlı hazır listeleri (girintiler Word'ünkü: 0,76 / 1,02 / 1,27 cm)
+  app.HEADING_NUMS = {
+    '1.': [numLevel('%1.', 'decimal', 21.6), numLevel('%1.%2.', 'decimal', 28.8), numLevel('%1.%2.%3.', 'decimal', 36)],
+    1: [numLevel('%1', 'decimal', 21.6), numLevel('%1.%2', 'decimal', 28.8), numLevel('%1.%2.%3', 'decimal', 36)],
+    'I.': [numLevel('%1.', 'upperRoman', 21.6), numLevel('%2.', 'upperLetter', 28.8), numLevel('%3.', 'decimal', 36)],
+  };
+  function cleanNum(src) {
+    if (!Array.isArray(src) || src.length !== 3) return null;
+    const out = src.map((L, i) => {
+      if (!L || typeof L !== 'object' || typeof L.text !== 'string' || L.text.length > 60) return null;
+      // eslint-disable-next-line no-control-regex
+      const text = L.text.replace(/[\u0000-\u001f]/g, '');
+      // Yalnızca kendi ve üst düzeylerin sayacı (%1 … %düzey) kullanılabilir
+      if (/%(?![1-3])/.test(text) || [...text.matchAll(/%([1-3])/g)].some((m) => +m[1] > i + 1)) return null;
+      return {
+        text,
+        fmt: app.NUM_FMTS[L.fmt] ? L.fmt : 'decimal',
+        start: Math.round(inRange(L.start, 0, 32767, 1)),
+        ind: inRange(L.ind, -1584, 1584, 0),
+        hang: inRange(L.hang, -1584, 1584, 0),
+        suff: /^(tab|space|nothing)$/.test(L.suff) ? L.suff : 'tab',
+        lgl: L.lgl === true,
+      };
+    });
+    return out.some(Boolean) ? out : null;
+  }
+  // Numaranın örneği (ör. "1. / 1.1. / 1.1.1."; ilk numara 1 değilse "(ilk: 3)"): araç çubuğunda gösterilir
+  app.numSample = function (N) {
+    const ONE = { decimal: '1', decimalZero: '01', upperRoman: 'I', lowerRoman: 'i', upperLetter: 'A', lowerLetter: 'a' };
+    const levels = (N || []).filter(Boolean);
+    const s = levels.map((L) => L.text.replace(/%([1-3])/g, (_, d) => (L.lgl || !N[d - 1] ? '1' : ONE[N[d - 1].fmt]))).join(' / ');
+    return levels.length && levels[0].start !== 1 ? `${s} (ilk: ${levels[0].start})` : s;
+  };
+
   // Dışarıdan gelen (dosya, yerel kayıt) stilleri denetle; eksik ya da bozuk alan yerleşik değeri alır
   app.cleanStyles = function (src, base = BUILTIN_STYLES) {
     const out = {};
     for (const k of app.STYLE_KEYS) {
       const s = (src && typeof src[k] === 'object' && src[k]) || {};
       const b = base[k] || BUILTIN_STYLES[k];
-      const num = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v) && v >= lo && v <= hi ? v : d);
       out[k] = {
         font: typeof s.font === 'string' && /^[\p{L}\p{N} ._-]{1,48}$/u.test(s.font.trim()) ? s.font.trim() : b.font,
-        size: num(s.size, 1, 1638, b.size),
+        size: inRange(s.size, 1, 1638, b.size),
         bold: typeof s.bold === 'boolean' ? s.bold : b.bold,
         italic: typeof s.italic === 'boolean' ? s.italic : b.italic,
         color: typeof s.color === 'string' && /^#[0-9a-f]{6}$/i.test(s.color) ? s.color.toLowerCase() : b.color,
         align: /^(left|center|right|justify)$/.test(s.align) ? s.align : b.align,
-        before: num(s.before, 0, 1584, b.before),
-        after: num(s.after, 0, 1584, b.after),
-        line: num(s.line, 0.06, 132, b.line),
+        before: inRange(s.before, 0, 1584, b.before),
+        after: inRange(s.after, 0, 1584, b.after),
+        line: inRange(s.line, 0.06, 132, b.line),
       };
     }
+    out.num = cleanNum(src && src.num);
     return out;
   };
   // Yeni belgelerin stilleri: "Varsayılan olarak ayarla" ile saklananlar, yoksa yerleşik
@@ -257,11 +303,14 @@
   // doğru yüksekliğe itilir; shape-outside:border-box sayesinde margin alanı metni itmez.
   // Float'lar doğrudan #flow'un çocuğudur: #flow tüm sayfalar boyunca uzandığı için yazdırırken
   // tarayıcı şeritleri sayfalara doğru böler (sıfır yükseklikli bir kapsayıcı içinde bölünmüyordu).
+  let sideBands = []; // metnin yanından aktığı şeritler (resmin yanı); fitTabs bunların yanındaki paragrafı yeniden ölçer
   function renderExclusions() {
     const { cw } = app.geom();
     const frag = document.createDocumentFragment();
     let prev = 0;
-    for (const bd of computeBands()) {
+    const bands = computeBands();
+    sideBands = bands.filter((bd) => bd.xL < cw);
+    for (const bd of bands) {
       const mt = bd.a - prev;
       const h = bd.b - bd.a;
       const hasLeft = bd.xL > 0;
@@ -345,8 +394,46 @@
       `.editor p, .editor div, .editor ul, .editor ol { margin: ${S.p.before}pt 0 ${S.p.after}pt; }`,
       ...['h1', 'h2', 'h3'].map((k) => `.editor ${k} { ${font(S[k])} margin: ${S[k].before}pt 0 ${S[k].after}pt; }`),
       `.page .hf, .cap { font-family: ${app.fontStack(S.p.font)}; }`,
+      ...headingNumCSS(S.num),
     ].join('\n');
     if (docStyleEl.textContent !== css) docStyleEl.textContent = css;
+    if (app.onStyles) app.onStyles();
+  };
+  // Başlık numaraları: sayaçlar (hn1–hn3) editörde kurulur; Başlık k, hn<k>'yi artırır ve alt düzeylerinkini
+  // sıfırlar (counter-set: kardeş başlıklarda counter-reset yeni sayaç açıp alt düzeyi sıfırlamıyor). Numara
+  // ::before'da; Word'deki gibi numaradan sonraki sekme asılı girintiye (yoksa sonraki 1,27 cm durağına) gider,
+  // numara oradan uzunsa kısa bir boşluk kalır.
+  function headingNumCSS(N) {
+    if (!N) return [];
+    const q = (s) => `"${s.replace(/[\\"]/g, '\\$&')}"`;
+    const reset = (from) => N.slice(from).map((L, j) => `hn${from + j + 1} ${L ? L.start - 1 : 0}`).join(' ');
+    const out = [`.editor { counter-reset: ${reset(0)}; }`];
+    N.forEach((L, i) => {
+      if (!L) return;
+      const sel = `.editor h${i + 1}:not([data-num="0"])`;
+      const content = L.text.split(/(%[1-3])/).filter(Boolean)
+        .map((t) => (/^%[1-3]$/.test(t) ? `counter(hn${t[1]}, ${app.NUM_FMTS[L.lgl || !N[t[1] - 1] ? 'decimal' : N[t[1] - 1].fmt]})` : q(t)));
+      if (L.suff === 'space') content.push('" "');
+      const first = L.ind - L.hang; // ilk satırın (numaranın) başladığı yer
+      const tabW = L.hang > 0 ? L.hang : 36 - (((first % 36) + 36) % 36);
+      out.push(`${sel} { counter-increment: hn${i + 1};${i < 2 ? ` counter-set: ${reset(i + 1)};` : ''} margin-left: ${L.ind}pt; text-indent: ${-L.hang}pt; }`);
+      out.push(`${sel}::before { content: ${content.join(' ') || '""'}; text-indent: 0;` +
+        `${L.suff === 'tab' ? ` display: inline-block; box-sizing: border-box; min-width: ${tabW}pt; padding-right: 0.3em;` : ''} }`);
+    });
+    return out;
+  }
+  // Başlık numaralı mı (düzeyi numaralı ve data-num="0" değil)
+  app.isNumbered = (b) => {
+    const N = state.styles.num;
+    return !!(N && /^H[123]$/.test(b.tagName) && b.getAttribute('data-num') !== '0' && N[b.tagName[1] - 1]);
+  };
+  // Paragrafın girintisini yaz (prop: marginLeft, marginRight, textIndent; px). Stildeki değerle (numaralı başlıkta
+  // numaralandırmanın girintisi, diğerlerinde 0) aynıysa satır içi biçim kalkar; farklıysa 0 da olsa yazılır.
+  app.setIndent = function (b, prop, px) {
+    const L = app.isNumbered(b) && state.styles.num[b.tagName[1] - 1];
+    const base = !L || prop === 'marginRight' ? 0 : ((prop === 'marginLeft' ? L.ind : -L.hang) * 4) / 3;
+    b.style[prop] = Math.abs(px - base) > 0.5 ? px + 'px' : '';
+    if (!b.getAttribute('style')) b.removeAttribute('style');
   };
   app.applyStyles();
   // Stil değişikliği: bütün sayfalar yeniden dizilir, tek geri alma adımı
@@ -924,8 +1011,174 @@
       unpinSelection(pins);
       changed = true;
     }
-    return hoistPageBreaks(ed) || changed;
+    const hoisted = hoistPageBreaks(ed);
+    return wrapTabs(ed) || hoisted || changed;
   };
+
+  // ---------- Özel sekme durakları (Word: w:tabs) ----------
+  // Paragrafın data-tabs özniteliği: "l56.69 r604.72." gibi; tür (l sola, c ortaya, r sağa, d ondalık) + metin alanının
+  // sol kenarından uzaklık (px; Word'deki gibi girintiden değil) + isteğe bağlı dolgu (. - _). Durak konan paragrafta
+  // her sekme karakteri kendi span.tab'ında sıfır genişlikte durur (css); genişliği fitTabs bir sonraki durağa göre
+  // padding-left olarak verir. Son özel duraktan sonra varsayılan 1,27 cm durakları, asılı girintide girinti de durak.
+  const TAB_RE = /^([lcrd])(-?\d+(?:\.\d+)?)([._-]?)$/;
+  app.parseTabs = (s) =>
+    String(s || '').split(/\s+/).map((t) => TAB_RE.exec(t)).filter(Boolean)
+      .map((m) => ({ type: m[1], pos: +m[2], leader: m[3] || '' }))
+      .sort((a, b) => a.pos - b.pos);
+  app.formatTabs = (list) =>
+    list.slice().sort((a, b) => a.pos - b.pos).map((t) => t.type + +(+t.pos).toFixed(2) + (t.leader || '')).join(' ');
+  // Blokta imlecin karakter uzaklığı (düğümler yeniden kurulurken imleç korunsun)
+  function caretOffsetIn(b) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !b.contains(sel.getRangeAt(0).startContainer)) return null;
+    const pre = document.createRange();
+    pre.setStart(b, 0);
+    pre.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+    return pre.toString().length;
+  }
+  // Sekme span'ının sonuna düşen imleç ardındaki metne konur: yazılan metin span'ın içine girmesin
+  function setCaretOffsetIn(b, off) {
+    const w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+    const r = document.createRange();
+    let last = null;
+    let after = null;
+    for (let t = w.nextNode(); t; t = w.nextNode()) {
+      last = t;
+      if (off < t.length || (off === t.length && !t.parentElement.classList.contains('tab'))) break;
+      if (off === t.length) {
+        const next = w.nextNode();
+        if (next) {
+          last = next;
+          off = 0;
+        } else after = t.parentElement;
+        break;
+      }
+      off -= t.length;
+    }
+    if (!last) return;
+    if (after) r.setStartAfter(after);
+    else r.setStart(last, Math.min(off, last.length));
+    r.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  function wrapTabs(ed) {
+    let changed = false;
+    for (const b of ed.querySelectorAll('[data-tabs]')) {
+      // Chrome'un sekme için açtığı <span style="white-space:pre"> sekme span'ı olur
+      b.querySelectorAll('span[style*="white-space"]').forEach((s) => {
+        if (s.textContent !== '\t' || s.classList.contains('tab')) return;
+        s.removeAttribute('style');
+        s.className = 'tab';
+        changed = true;
+      });
+      // Sekme span'ına yazılmış metin (Chrome yazmayı span'ın içinde sürdürebilir): span açılır, sekme yeniden sarılır
+      const bad = [...b.querySelectorAll('.tab')].filter((t) => t.textContent !== '\t');
+      if (bad.length) {
+        const off = caretOffsetIn(b);
+        bad.forEach((t) => t.replaceWith(...t.childNodes));
+        if (off !== null) setCaretOffsetIn(b, off);
+        changed = true;
+      }
+      const texts = [];
+      const w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+      for (let t = w.nextNode(); t; t = w.nextNode())
+        if (t.nodeValue.includes('\t') && !(t.nodeValue === '\t' && t.parentElement.classList.contains('tab'))) texts.push(t);
+      if (!texts.length) continue;
+      const off = caretOffsetIn(b);
+      for (const t of texts) {
+        const frag = document.createDocumentFragment();
+        for (const part of t.nodeValue.split(/(\t)/)) {
+          if (!part) continue;
+          if (part !== '\t') frag.appendChild(document.createTextNode(part));
+          else frag.appendChild(Object.assign(document.createElement('span'), { className: 'tab', textContent: '\t' }));
+        }
+        t.replaceWith(frag);
+      }
+      if (off !== null) setCaretOffsetIn(b, off);
+      changed = true;
+    }
+    return changed;
+  }
+  const DEFAULT_TAB = U.cmToPx(1.27);
+  const TAB_LEADER = { '.': 'lead-dot', '-': 'lead-hyphen', _: 'lead-line' };
+  const tabSig = new WeakMap(); // blok → en son hesaplandığı durum (değişmeyen paragraf yeniden ölçülmez)
+  function fitTabs() {
+    const ed = els.editor;
+    ed.querySelectorAll('.tab[style]').forEach((t) => !t.closest('[data-tabs]') && t.removeAttribute('style')); // durağı kalkan paragraf
+    const blocks = [...ed.querySelectorAll('[data-tabs]')].filter((b) => b.querySelector('.tab'));
+    if (!blocks.length) return;
+    const z = state.zoom;
+    const { cw } = app.geom();
+    const fr = els.flow.getBoundingClientRect();
+    const fx = fr.left;
+    const sigOf = (b) => {
+      const r = b.getBoundingClientRect();
+      // Yanındaki resim şeridi satırların başını kaydırır: şerit ya da paragrafın ona göre yeri değişince yeniden ölçülür
+      const top = (r.top - fr.top) / z;
+      const bottom = (r.bottom - fr.top) / z;
+      const near = sideBands.filter((bd) => bd.a < bottom && bd.b > top).map((bd) => [bd.a - top, bd.b - top, bd.xL, bd.xR].map(Math.round).join(','));
+      return [b.dataset.tabs, b.textContent, b.innerHTML.length, b.getAttribute('style'), Math.round(r.left), Math.round(r.width), z, near.join(';')].join('|');
+    };
+    for (const b of blocks) {
+      if (tabSig.get(b) === sigOf(b)) continue;
+      const stops = app.parseTabs(b.dataset.tabs);
+      const cs = getComputedStyle(b);
+      const indent = (b.getBoundingClientRect().left - fx) / z + (parseFloat(cs.paddingLeft) || 0);
+      const hanging = parseFloat(cs.textIndent) < -0.5;
+      // Soldan sağa: sonraki sekmelerin eski genişliği ölçülen satırı kırmasın diye önce hepsi sıfırlanır
+      const tabs = [...b.querySelectorAll('.tab')];
+      tabs.forEach((t) => (t.style.paddingLeft = '0px'));
+      tabs.forEach((t, ti) => {
+        const tr = t.getBoundingClientRect();
+        const x = (tr.left - fx) / z;
+        let stop = stops.find((s) => s.pos > x + 0.5);
+        if (hanging && indent > x + 0.5 && (!stop || indent < stop.pos)) stop = { type: 'l', pos: indent, leader: '' };
+        if (!stop) {
+          // Sağ kenarın ötesinde durak yok: sekme ilerlemez, ardındaki metin alt satıra geçer
+          const pos = (Math.floor((x + 0.5) / DEFAULT_TAB) + 1) * DEFAULT_TAB;
+          stop = { type: 'l', pos: pos > cw + 0.5 ? x : pos, leader: '' };
+        }
+        let w = stop.pos - x;
+        if (stop.type !== 'l') {
+          // Sekmeden sonraki metin (sonraki sekmeye ya da satır sonuna kadar, aynı satırdaki kısmı)
+          const seg = document.createRange();
+          seg.setStartAfter(t);
+          let end = null;
+          const nextTab = tabs[ti + 1];
+          if (nextTab) seg.setEndBefore(nextTab);
+          else seg.setEnd(b, b.childNodes.length);
+          if (stop.type === 'd') {
+            const txt = seg.toString();
+            const i = txt.indexOf(',') >= 0 ? txt.indexOf(',') : txt.indexOf('.');
+            if (i >= 0) {
+              end = document.createRange();
+              end.setStart(seg.startContainer, seg.startOffset);
+              // ondalık ayıracına kadar: metin düğümlerinde say
+              let left = i;
+              const w2 = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+              for (let tx = w2.nextNode(); tx; tx = w2.nextNode()) {
+                if (!seg.intersectsNode(tx)) continue;
+                const from = tx === seg.startContainer ? seg.startOffset : 0;
+                if (left <= tx.length - from) {
+                  end.setEnd(tx, from + left);
+                  break;
+                }
+                left -= tx.length - from;
+              }
+            }
+          }
+          const rs = [...(end || seg).getClientRects()].filter((q) => q.width > 0 && q.top < tr.bottom && q.bottom > tr.top);
+          const segW = rs.reduce((s, q) => s + q.width, 0) / z;
+          w -= (stop.type === 'c' ? segW / 2 : segW) + 0.2; // küçük pay: yuvarlama satırı taşırıp kırmasın
+        }
+        t.style.paddingLeft = Math.max(0, +w.toFixed(2)) + 'px';
+        t.className = 'tab' + (stop.leader ? ' ' + TAB_LEADER[stop.leader] : '');
+      });
+      tabSig.set(b, sigOf(b));
+    }
+  }
 
   // Sayfa sonu (.pb) her zaman editörün doğrudan çocuğudur. Liste maddesinde (Ctrl+Enter) ya da başka bir blokta
   // kalan sayfa sonu, içinde bulunduğu üst düzey bloğu böler: ardındaki içerik (listede kalan maddeler, numara
@@ -970,6 +1223,7 @@
   app.layout = function () {
     markEmptyLines();
     renderExclusions();
+    fitTabs();
     fitPageBreaks();
     for (let i = 0; i < 25; i++) {
       const n = neededPages();
@@ -977,6 +1231,7 @@
       state.pageCount = n;
       renderPages();
       renderExclusions();
+      fitTabs();
       fitPageBreaks();
     }
     keep.length = Math.min(keep.length, Math.max(0, state.pageCount - 1));
@@ -1133,7 +1388,8 @@
       hf: state.hf,
       styles: state.styles,
       minPages: state.minPages,
-      html: els.editor.innerHTML.replace(/ class="(el)?"/g, ''), // yardımcı sınıf düzen sırasında yeniden eklenir
+      // yardımcı sınıf ve sekme genişlikleri düzen sırasında yeniden hesaplanır
+      html: els.editor.innerHTML.replace(/ class="(el)?"/g, '').replace(/(<span class="tab[^"]*") style="[^"]*"/g, '$1'),
       images: state.images,
       assets,
       savedAt: new Date().toISOString(),

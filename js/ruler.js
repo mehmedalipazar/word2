@@ -1,6 +1,8 @@
-/* Cetvel: imlecin bulunduğu paragrafın girintileri; işaretler sürüklenerek değiştirilir (Word gibi).
+/* Cetvel: imlecin bulunduğu paragrafın girintileri ve sekme durakları; işaretler sürüklenerek değiştirilir (Word gibi).
  * İlk satır (üst üçgen): yalnızca ilk satır girintisi. Asılı (alt üçgen): sol girinti, ilk satır yerinde kalır.
  * Sol (kutu): sol girinti ilk satırla birlikte. Sağ (sağdaki üçgen): sağ girinti.
+ * Sekme durakları (core.js: data-tabs): cetvele tıklamak soldaki kutuda seçili türde durak koyar, durak sürüklenerek
+ * taşınır, cetvelin dışına (aşağı/yukarı) sürüklenince kalkar; çift tık Sekmeler penceresini açar.
  * 0,25 cm'ye yapışır (Alt: serbest). Liste maddelerinde girinti düzeye bağlıdır: işaretler yalnızca gösterilir.
  */
 (function () {
@@ -16,6 +18,15 @@
   pageEl.querySelectorAll('.rm').forEach((m) => (marks[m.dataset.rm] = m));
   const STEP = U.cmToPx(0.25);
   const CM = U.cmToPx(1);
+  const typeEl = document.getElementById('rulerTabType');
+  const TYPES = ['l', 'c', 'r', 'd'];
+  const TYPE_NAMES = { l: 'Sola', c: 'Ortaya', r: 'Sağa', d: 'Ondalık' };
+  let tabType = 'l';
+  typeEl.addEventListener('click', () => {
+    tabType = TYPES[(TYPES.indexOf(tabType) + 1) % TYPES.length];
+    typeEl.className = 'ruler-tabtype ' + tabType;
+    typeEl.title = typeEl.title.replace(/^Sekme türü: \S+/, 'Sekme türü: ' + TYPE_NAMES[tabType]);
+  });
   let geomKey = '';
   let ticks = null;
 
@@ -67,9 +78,25 @@
     marks.right.style.left = (g.PW - g.m.r - R) * z + 'px';
   }
 
+  // İmlecin paragrafının sekme durakları
+  function showTabs(b) {
+    pageEl.querySelectorAll('.rt').forEach((r) => r.remove());
+    if (!b || !b.dataset.tabs) return;
+    const g = app.geom();
+    for (const t of app.parseTabs(b.dataset.tabs)) {
+      const d = document.createElement('div');
+      d.className = 'rt ' + t.type;
+      d.dataset.pos = t.pos;
+      d.style.left = (g.m.l + t.pos) * state.zoom + 'px';
+      d.title = `${TYPE_NAMES[t.type]} sekme durağı: ${String(SS.round(U.pxToCm(t.pos), 2)).replace('.', ',')} cm (sürükle: taşı, cetvelin dışına sürükle: kaldır, çift tık: Sekmeler)`;
+      pageEl.appendChild(d);
+    }
+  }
+
   function showMarks() {
     const b = state.selection.length ? null : caretBlock();
     pageEl.classList.toggle('off', !b);
+    showTabs(b);
     if (!b) return;
     const z = state.zoom;
     const cs = getComputedStyle(b);
@@ -91,10 +118,75 @@
   els.workspace.addEventListener('scroll', place, { passive: true });
   window.addEventListener('resize', place);
 
+  const tabBlocks = () => app.selectedBlocks().filter((b) => !b.classList.contains('pb'));
+  function setTabs(blocks, fn) {
+    for (const b of blocks) {
+      const list = fn(app.parseTabs(b.dataset.tabs));
+      if (list.length) b.dataset.tabs = app.formatTabs(list);
+      else b.removeAttribute('data-tabs');
+    }
+    app.normalizeBlocks(); // sekmeler span'a (core.js: wrapTabs)
+    app.scheduleLayout();
+  }
+  // Durak koy / taşı / kaldır
+  function tabPointer(e, stopEl) {
+    app.focusEditor();
+    const blocks = tabBlocks();
+    if (!blocks.length) return;
+    const g = app.geom();
+    const pr = pageEl.getBoundingClientRect();
+    const at = (ev) => {
+      const v = (ev.clientX - pr.left) / state.zoom - g.m.l;
+      return SS.clamp(ev.altKey ? v : Math.round(v / STEP) * STEP, 0, g.cw);
+    };
+    let from = stopEl ? +stopEl.dataset.pos : null;
+    if (from === null) {
+      // Boş yere tıklama: seçili türde yeni durak
+      const pos = at(e);
+      setTabs(blocks, (l) => l.filter((t) => Math.abs(t.pos - pos) > 0.5).concat({ type: tabType, pos, leader: '' }));
+      app.afterFormat();
+      showTabs(blocks[0]);
+      return;
+    }
+    const type = stopEl.className.split(' ')[1];
+    const leader = (app.parseTabs(blocks[0].dataset.tabs).find((t) => Math.abs(t.pos - from) < 0.5) || {}).leader || '';
+    let moved = false;
+    let gone = false;
+    const move = (ev) => {
+      const off = Math.abs(ev.clientY - (pr.top + pr.height / 2)) > 24; // cetvelin dışı: kaldır
+      const pos = at(ev);
+      if (!moved && Math.abs(ev.clientX - e.clientX) < 2 && !off) return;
+      moved = true;
+      setTabs(blocks, (l) => {
+        const rest = l.filter((t) => Math.abs(t.pos - from) > 0.5 && Math.abs(t.pos - pos) > 0.5);
+        return off ? rest : rest.concat({ type, pos, leader });
+      });
+      gone = off;
+      if (!off) from = pos;
+      showTabs(blocks[0]);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (moved) app.afterFormat();
+      if (gone) SS.toast('Sekme durağı kaldırıldı.', 1500);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+  ruler.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.rt') && app.tabsDialog) app.tabsDialog();
+  });
+
   ruler.addEventListener('pointerdown', (e) => {
     const m = e.target.closest('.rm');
     e.preventDefault(); // metindeki seçim korunur
-    if (!m || pageEl.classList.contains('off') || pageEl.classList.contains('list')) return;
+    if (e.target === typeEl || typeEl.contains(e.target) || pageEl.classList.contains('off')) return;
+    const stop = e.target.closest('.rt');
+    if (stop || (!m && pageEl.contains(e.target))) return tabPointer(e, stop);
+    if (!m || pageEl.classList.contains('list')) return;
     app.focusEditor();
     const blocks = app.selectedBlocks().filter((b) => b.tagName !== 'LI' && !b.classList.contains('pb'));
     if (!blocks.length) return;
@@ -120,10 +212,9 @@
       else R = Math.max(0, snap(R0 - d));
       if (g.cw - Math.max(L, L + T) - R < U.cmToPx(2)) return; // metne en az 2 cm kalsın
       for (const b of blocks) {
-        b.style.marginLeft = L > 0.5 ? L + 'px' : '';
-        b.style.textIndent = Math.abs(T) > 0.5 ? T + 'px' : '';
-        b.style.marginRight = R > 0.5 ? R + 'px' : '';
-        if (!b.getAttribute('style')) b.removeAttribute('style');
+        app.setIndent(b, 'marginLeft', L);
+        app.setIndent(b, 'textIndent', T);
+        app.setIndent(b, 'marginRight', R);
       }
       moved = true;
       setMarks(L + T, L, R);

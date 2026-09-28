@@ -102,7 +102,8 @@
     '[': () => app.growFont(-1, true),
     k: () => app.linkDialog(),
   };
-  const SHIFT_KEYS = { l: () => app.exec('insertUnorderedList'), m: () => app.indent(-1), '=': TEXT_KEYS['='], '+': TEXT_KEYS['+'], '>': TEXT_KEYS['>'], '<': TEXT_KEYS['<'] };
+  const SHIFT_KEYS = { l: () => app.exec('insertUnorderedList'), m: () => app.indent(-1), '=': TEXT_KEYS['='], '+': TEXT_KEYS['+'], '>': TEXT_KEYS['>'], '<': TEXT_KEYS['<'],
+    g: () => app.wordCountDialog() };
   const IMAGE_ALIGN = { l: 'left', e: 'center', r: 'right' };
 
   document.addEventListener('keydown', (e) => {
@@ -353,15 +354,77 @@
   }
   els.workspace.addEventListener('scroll', updateStatus, { passive: true });
 
+  // Sözcük sayısı (Word gibi): boşlukla ayrılan her parça bir sözcük; metin seçiliyken "seçili / toplam". Başlık ve
+  // liste numaraları (CSS'le çizilir), şekil yazıları ve üst/alt bilgi sayılmaz.
+  const countWords = (s) => (s.match(/\S+/g) || []).length;
+  const trInt = (n) => n.toLocaleString('tr-TR');
+  let totalWords = 0;
+  function editorSelection() {
+    const sel = window.getSelection();
+    return sel.rangeCount && !sel.isCollapsed && els.editor.contains(sel.getRangeAt(0).commonAncestorContainer) ? sel : null;
+  }
+  function showWords() {
+    const sel = editorSelection();
+    $('stWords').textContent = (sel ? trInt(countWords(sel.toString())) + ' / ' : '') + trInt(totalWords) + ' sözcük';
+  }
   let wordTimer = 0;
   function updateWords() {
     clearTimeout(wordTimer);
     wordTimer = setTimeout(() => {
-      const n = (els.editor.innerText.match(/\S+/g) || []).length;
-      $('stWords').textContent = n.toLocaleString('tr-TR') + ' kelime';
-      els.editor.classList.toggle('empty', !n && !state.images.length);
+      totalWords = countWords(els.editor.innerText);
+      els.editor.classList.toggle('empty', !totalWords && !state.images.length);
+      showWords();
     }, 250);
   }
+  let selWordTimer = 0;
+  document.addEventListener('selectionchange', () => {
+    clearTimeout(selWordTimer);
+    selWordTimer = setTimeout(showWords, 150);
+  });
+
+  // Sözcük Sayısı penceresi (Word: Gözden Geçir > Sözcük Sayısı, Ctrl+Shift+G): seçim varsa seçimin, yoksa belgenin
+  // sayfa, sözcük, karakter, paragraf ve satır sayısı. Satır: metnin ekrandaki satırları (boş paragraflar hariç).
+  app.wordCountDialog = function () {
+    const sel = editorSelection();
+    const r = sel && sel.getRangeAt(0);
+    const text = sel ? sel.toString() : els.editor.innerText;
+    const paras = new Set();
+    const rects = [];
+    const w = document.createTreeWalker(els.editor, NodeFilter.SHOW_TEXT);
+    for (let t = w.nextNode(); t; t = w.nextNode()) {
+      if (!/\S/.test(t.nodeValue) || (r && !r.intersectsNode(t))) continue;
+      const tr = document.createRange();
+      tr.selectNodeContents(t);
+      if (r && r.startContainer === t) tr.setStart(t, r.startOffset);
+      if (r && r.endContainer === t) tr.setEnd(t, r.endOffset);
+      if (!/\S/.test(tr.toString())) continue;
+      const b = t.parentElement.closest('p,h1,h2,h3,li,div');
+      if (b) paras.add(b);
+      for (const q of tr.getClientRects()) if (q.width > 0) rects.push(q);
+    }
+    // Aynı satırdaki parçalar (farklı punto) dikeyde örtüşür
+    rects.sort((a, b) => a.top - b.top);
+    let lines = 0;
+    let bottom = -Infinity;
+    for (const q of rects) {
+      if (q.top >= bottom - 1) {
+        lines++;
+        bottom = q.bottom;
+      } else bottom = Math.max(bottom, q.bottom);
+    }
+    const chars = text.replace(/\n/g, '');
+    $('wcScope').textContent = sel ? 'Seçili metin' : 'Belgenin tamamı';
+    $('wcPages').textContent = trInt(state.pageCount);
+    $('wcWords').textContent = trInt(countWords(text));
+    $('wcChars').textContent = trInt(chars.replace(/\s/g, '').length);
+    $('wcCharsSp').textContent = trInt(chars.length);
+    $('wcParas').textContent = trInt(paras.size);
+    $('wcLines').textContent = trInt(lines);
+    $('wordsDialog').showModal();
+  };
+  $('stWords').addEventListener('mousedown', (e) => e.preventDefault()); // metindeki seçim korunur
+  $('stWords').addEventListener('click', () => app.wordCountDialog());
+  $('wordsDialog').addEventListener('close', () => app.focusEditor());
   function updateUndo() {
     document.querySelectorAll('[data-cmd="undo"]').forEach((b) => (b.disabled = !app.canUndo()));
     document.querySelectorAll('[data-cmd="redo"]').forEach((b) => (b.disabled = !app.canRedo()));
