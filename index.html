@@ -82,6 +82,33 @@
   <div class="group">
     <button class="tb" data-cmd="insertUnorderedList" data-icon="list" title="Madde işaretleri (Ctrl+Shift+L)"></button>
     <button class="tb" data-cmd="insertOrderedList" data-icon="listOrdered" title="Numaralandırma"></button>
+    <select id="listFmt" title="Liste biçimi (Word: Madde İşareti ve Numaralandırma kitaplığı, Çok Düzeyli Liste): seçili maddelerin düzeyine uygulanır; imleç listede değilse paragraflar listeye çevrilir">
+      <option value="" hidden>Liste biçimi</option>
+      <optgroup label="Madde işaretleri">
+        <option value="bullet|•">•  Nokta</option>
+        <option value="bullet|–">–  Tire</option>
+        <option value="bullet|▪">▪  Kare</option>
+        <option value="bullet|➢">➢  Ok</option>
+        <option value="bullet|✓">✓  Onay</option>
+        <option value="bullet|❖">❖  Karo</option>
+        <option value="bullet|o">o  Halka</option>
+      </optgroup>
+      <optgroup label="Numaralandırma">
+        <option value="decimal|%1.">1. 2. 3.</option>
+        <option value="decimal|%1)">1) 2) 3)</option>
+        <option value="lowerLetter|%1)">a) b) c)</option>
+        <option value="lowerLetter|%1.">a. b. c.</option>
+        <option value="upperLetter|%1.">A. B. C.</option>
+        <option value="upperRoman|%1.">I. II. III.</option>
+        <option value="lowerRoman|%1.">i. ii. iii.</option>
+        <option value="decimal|(%1)">(1) (2) (3)</option>
+      </optgroup>
+      <optgroup label="Çok düzeyli">
+        <option value="decimal|%1.;decimal|%1.%2.;decimal|%1.%2.%3.">1. / 1.1. / 1.1.1.</option>
+      </optgroup>
+      <option disabled>──────────</option>
+      <option value="value">Numaralandırma değerini ayarla…</option>
+    </select>
     <select id="headingNum" title="Başlık numaralandırması (Word: Çok Düzeyli Liste): Başlık 1–3 kendiliğinden numaralanır; başlık eklenince, silinince ya da taşınınca numaralar güncellenir">
       <option value="">Başlık no. yok</option>
       <option value="1.">1. / 1.1. / 1.1.1.</option>
@@ -95,6 +122,7 @@
   </div>
   <div class="group">
     <button class="btn" data-cmd="insertImage" data-icon="image" title="Resim ekle (ya da dosyayı sayfaya sürükleyin / yapıştırın)">Resim</button>
+    <button class="tb" data-cmd="symbol" title="Simge ekle (°, ±, µ, ‰, α…); metinde onaltılık kod + Alt+X da çevirir (00B0 → °)"><span class="sym-ic">Ω</span></button>
     <button class="tb" data-cmd="pageBreak" data-icon="pageBreak" title="Sayfa sonu (Ctrl+Enter)"></button>
     <button class="tb" data-cmd="addPage" data-icon="filePlus" title="Sona boş sayfa ekle"></button>
     <button class="tb" data-cmd="removePage" data-icon="fileMinus" title="Sondaki boş sayfayı kaldır"></button>
@@ -133,6 +161,11 @@
     <select id="capLabel" title="Etiket (numaralar her etiket için ayrı sayılır)">
       <option>Şekil</option><option>Harita</option><option>Fotoğraf</option><option>Grafik</option><option>Resim</option><option>Tablo</option>
     </select>
+    <select id="capNum" title="Numaralandırma (Word: Resim Yazısı > Numaralandırma > Bölüm numarasını ekle): düz ya da Başlık 1'in numarasıyla (Şekil 2.1, numara her bölümde yeniden başlar); bu etiketteki bütün yazılara uygulanır">
+      <option value="">1, 2, 3</option>
+      <option value=".">Bölüme göre: 2.1</option>
+      <option value="-">Bölüme göre: 2-1</option>
+    </select>
     <button class="tb" data-cmd="captionPos" data-icon="capPos" title="Yazıyı resmin üstüne/altına al"></button>
   </div>
   <div class="group">
@@ -158,6 +191,21 @@
     <span class="unit">cm</span>
   </div>
 </div>
+</div>
+
+<div class="symbols chrome" id="symbolPanel" role="dialog" aria-label="Simge" hidden>
+  <div class="find-row">
+    <strong>Simge</strong>
+    <span class="grow"></span>
+    <button class="tb small" data-sym="close" data-icon="close" title="Kapat (Esc)"></button>
+  </div>
+  <div class="sym-sec">Son kullanılanlar</div>
+  <div class="sym-grid" id="symRecent"></div>
+  <div id="symGroups"></div>
+  <div class="find-row">
+    <input id="symCode" placeholder="Karakter kodu, ör. 00B0" spellcheck="false" autocomplete="off">
+    <button class="btn small" data-sym="code" title="Onaltılık Unicode kodundaki karakteri ekle">Ekle</button>
+  </div>
 </div>
 
 <div class="find chrome" id="findPanel" role="dialog" aria-label="Bul ve Değiştir" hidden>
@@ -353,6 +401,18 @@
       <span class="grow"></span>
       <button type="button" value="cancel" class="btn">Vazgeç</button>
       <button value="ok" class="btn primary">Uygula</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="numValueDialog" class="dialog">
+  <form method="dialog">
+    <h2>Numaralandırma değerini ayarla</h2>
+    <label>Değer<input name="value" inputmode="numeric" autocomplete="off"></label>
+    <p class="hint-text">Madde listenin başındaysa liste bu numaradan başlar; ortasındaysa liste bu maddeden bölünür ve yeni liste bu numarayla başlar.</p>
+    <div class="actions">
+      <button type="button" value="cancel" class="btn">Vazgeç</button>
+      <button value="ok" class="btn primary">Tamam</button>
     </div>
   </form>
 </dialog>

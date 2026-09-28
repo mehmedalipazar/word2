@@ -208,18 +208,64 @@
     const y0 = Math.min(bb.y, c.y);
     return { x: x0, y: y0, w: Math.max(bb.x + bb.w, c.x + c.w) - x0, h: Math.max(bb.y + bb.h, c.y + c.h) - y0 };
   };
-  // Numaralar belge sırasına göre (sayfa, üstten alta, soldan sağa), her etiket kendi içinde
+  // Numaralar belge sırasına göre (sayfa, üstten alta, soldan sağa), her etiket kendi içinde. caption.chapter
+  // (ayırıcı: "." "-" "–" "—") bölüm numaralıdır (Word: Resim Yazısı > Numaralandırma > Bölüm numarasını ekle):
+  // numara, resmin üstünde kalan son Başlık 1'in numarası + ayırıcı + o bölümdeki sıra ("Şekil 2.1"); sıra her
+  // Başlık 1'de yeniden başlar. Döner: id → { n: sıra, ch: bölüm numarası ya da null, sep, text: görünen numara }
   app.captionNumbers = function () {
     const list = state.images.filter((i) => i.caption).sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x);
+    const sepOf = (c) => (/^[.:\-–—]$/.test(c.chapter) ? c.chapter : null);
+    const marks = list.some((i) => sepOf(i.caption)) ? chapterMarks() : [];
     const counters = {};
     const nums = new Map();
     for (const img of list) {
       const l = img.caption.label || 'Şekil';
-      counters[l] = (counters[l] || 0) + 1;
-      nums.set(img.id, counters[l]);
+      const sep = sepOf(img.caption);
+      let ch = null;
+      let key = l;
+      if (sep) {
+        const top = app.aabb(img).y;
+        let m = null;
+        for (const h of marks) if (h.page < img.page || (h.page === img.page && h.y <= top)) m = h;
+        ch = m ? m.text : chapterText(0);
+        key = `${l}\u0000${m ? m.idx : -1}`;
+      }
+      counters[key] = (counters[key] || 0) + 1;
+      nums.set(img.id, { n: counters[key], ch, sep, text: sep ? `${ch}${sep}${counters[key]}` : String(counters[key]) });
     }
     return nums;
   };
+  // Başlık 1'lerin yeri (sayfa, sayfanın üstünden y) ve numarası: başlık numaralandırması varsa onun sayacı ve
+  // biçimi (numarasız başlık yeni bölüm başlatır, numarası bir öncekininkidir), yoksa başlık sırası
+  const romanUp = (n) => {
+    let s = '';
+    for (const [v, r] of [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']])
+      for (; n >= v; n -= v) s += r;
+    return s;
+  };
+  function chapterText(c) {
+    const L = state.styles.num && state.styles.num[0];
+    const f = !L || L.lgl ? 'decimal' : L.fmt;
+    if (c < 1 || f === 'decimal') return String(c);
+    if (f === 'decimalZero') return String(c).padStart(2, '0');
+    if (/Roman$/.test(f)) return f === 'upperRoman' ? romanUp(c) : romanUp(c).toLowerCase();
+    let s = '';
+    for (let n = c; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(97 + ((n - 1) % 26)) + s;
+    return f === 'upperLetter' ? s.toUpperCase() : s;
+  }
+  function chapterMarks() {
+    const L = state.styles.num && state.styles.num[0];
+    const g = app.geom();
+    const fr = els.flow.getBoundingClientRect();
+    const z = state.zoom;
+    let c = L ? L.start - 1 : 0;
+    return [...els.editor.querySelectorAll('h1')].map((h, idx) => {
+      if (!L || h.getAttribute('data-num') !== '0') c++;
+      const y = (h.getBoundingClientRect().top - fr.top) / z;
+      const page = Math.max(0, Math.floor(y / g.stride));
+      return { page, y: y - page * g.stride + g.m.t, idx, text: chapterText(c) };
+    });
+  }
 
   // ---------- Metin dışlama şeritleri ----------
   // Akış koordinatları: (0,0) = ilk sayfanın metin alanının sol-üst köşesi.
@@ -446,6 +492,68 @@
     app.commit('edit');
   };
 
+  // ---------- Liste biçimleri (Word: Madde İşareti / Numaralandırma kitaplığı, Çok Düzeyli Liste) ----------
+  // Listenin (ol/ul) data-lf özniteliği düzeylerinin biçimidir: "düzey1;düzey2;…", her düzey "biçim|metin". Biçim
+  // Word'ün numFmt'si (decimal, decimalZero, lowerLetter, upperLetter, lowerRoman, upperRoman) ya da bullet; metin
+  // Word'ün lvlText'i: %1 listenin kendi maddeleri, %2 bir kat içerideki liste… (madde işaretinde işaretin kendisi).
+  // Düzey 1 listenin kendi maddelerine, düzey k kendi biçimi olmayan k-1 kat içerideki listelere uygulanır (türü
+  // tutuyorsa: numaralı düzey ol'a, madde işareti ul'ye). Verilmeyen düzey css/app.css'teki varsayılandır (1. a. i. /
+  // • o ▪). İşaretler CSS sayacıyla çizilir (listFmtCSS); %1.%2. gibi art arda düzeyler counters() ile; ol[start]
+  // numarayı başlatır.
+  const LF_FMTS = [...Object.keys(app.NUM_FMTS), 'bullet'];
+  app.parseLF = (s) =>
+    String(s || '').split(';').map((t) => {
+      const m = /^([a-zA-Z]+)\|([^;|]{1,30})$/u.exec(t);
+      // eslint-disable-next-line no-control-regex
+      return m && LF_FMTS.includes(m[1]) && !/[\u0000-\u001f]/.test(m[2]) ? { fmt: m[1], text: m[2] } : null;
+    });
+  app.formatLF = (levels) => {
+    const out = levels.map((L) => (L ? `${L.fmt}|${L.text}` : ''));
+    while (out.length && !out[out.length - 1]) out.pop();
+    return out.join(';');
+  };
+  // css/app.css'teki varsayılan işaret (k: 0'dan başlayan düzey)
+  app.defaultLevel = (k, ordered) =>
+    ordered ? { fmt: ['decimal', 'lowerLetter', 'lowerRoman'][Math.min(k, 2)], text: `%${k + 1}.` } : { fmt: 'bullet', text: ['•', 'o', '▪'][Math.min(k, 2)] };
+  // Düzey metnindeki yer tutucuları kaydır (ör. kitaplıktaki "%1)" 2. düzeye "%2)" olarak konur)
+  app.shiftLevel = (L, by) => L && { ...L, text: L.fmt === 'bullet' ? L.text : L.text.replace(/%([1-9])/g, (_, d) => '%' + Math.min(9, Math.max(1, +d + by))) };
+  const cssStr = (s) => `"${String(s).replace(/[\\"]/g, '\\$&')}"`;
+  function markerContent(L) {
+    const ph = L.fmt === 'bullet' ? [] : [...L.text.matchAll(/%[1-9]/g)];
+    if (!ph.length) return `${cssStr(L.text)} "\\9"`;
+    const f = app.NUM_FMTS[L.fmt];
+    const a = ph[0].index;
+    const b = ph[ph.length - 1].index + 2;
+    const num = ph.length === 1 ? `counter(list-item, ${f})` : `counters(list-item, ${cssStr(L.text.slice(a + 2, ph[1].index))}, ${f})`;
+    return [a ? cssStr(L.text.slice(0, a)) : '', num, b < L.text.length ? cssStr(L.text.slice(b)) : '', '"\\9"'].filter(Boolean).join(' ');
+  }
+  function listFmtCSS(v) {
+    const attr = `[data-lf=${cssStr(v)}]`;
+    return app.parseLF(v).map((L, k) => {
+      if (!L) return '';
+      const tag = L.fmt === 'bullet' ? 'ul' : 'ol';
+      const sel = k ? `.editor ${attr} ${':is(ol, ul) '.repeat(k - 1)}${tag}:not([data-lf])` : `.editor ${tag}${attr}`;
+      return `${sel} > li::marker { content: ${markerContent(L)}; }`;
+    }).filter(Boolean).join('\n');
+  }
+  const lfStyleEl = document.head.appendChild(document.createElement('style'));
+  lfStyleEl.id = 'listStyles';
+  const lfDone = new Set(); // CSS'i yazılmış biçimler (belgede kalmasa da durur)
+  function applyListStyles(ed) {
+    let add = false;
+    ed.querySelectorAll('[data-lf]').forEach((el) => {
+      // Dosyadan ya da panodan gelen değer doğrulanır; liste olmayan öğede anlamı yok
+      const v = /^(OL|UL)$/.test(el.tagName) ? app.formatLF(app.parseLF(el.getAttribute('data-lf'))) : '';
+      if (!v) return el.removeAttribute('data-lf');
+      if (v !== el.getAttribute('data-lf')) el.setAttribute('data-lf', v);
+      if (!lfDone.has(v)) {
+        lfDone.add(v);
+        add = true;
+      }
+    });
+    if (add) lfStyleEl.textContent = [...lfDone].map(listFmtCSS).join('\n');
+  }
+
   function renderPages() {
     const g = app.geom();
     const mk = (cls, css) => {
@@ -520,7 +628,7 @@
     }
     const bb = app.aabb(img);
     el.style.width = Math.max(bb.w, app.CAP_MIN_W) + 'px';
-    el.firstChild.textContent = `${img.caption.label || 'Şekil'} ${nums.get(img.id) || 1}.`;
+    el.firstChild.textContent = `${img.caption.label || 'Şekil'} ${(nums.get(img.id) || { text: '1' }).text}.`;
     const t = el.lastChild;
     if (!t.isContentEditable && t.textContent !== img.caption.text) t.textContent = img.caption.text || '';
     capH.set(img.id, el.offsetHeight);
@@ -1012,6 +1120,7 @@
       changed = true;
     }
     const hoisted = hoistPageBreaks(ed);
+    applyListStyles(ed); // liste biçimlerinin CSS'i
     return wrapTabs(ed) || hoisted || changed;
   };
 
@@ -1151,7 +1260,10 @@
           else seg.setEnd(b, b.childNodes.length);
           if (stop.type === 'd') {
             const txt = seg.toString();
-            const i = txt.indexOf(',') >= 0 ? txt.indexOf(',') : txt.indexOf('.');
+            // Word bölge ayarındaki ondalık ayırıcıya hizalar; Türkçede virgül. Virgül yoksa sayının sonu durakta
+            // biter ("3.250": binlik ayırıcılı tam sayı), sayı da yoksa bütün parça (sağa hizalı gibi)
+            const num = /\d(?:[\d.]*\d)?/.exec(txt);
+            const i = txt.includes(',') ? txt.indexOf(',') : num ? num.index + num[0].length : -1;
             if (i >= 0) {
               end = document.createRange();
               end.setStart(seg.startContainer, seg.startOffset);
@@ -1239,9 +1351,27 @@
       selDirty = false;
       markSelectionPages(); // düzen güncel: ölçüm ek maliyetsiz
     }
+    refreshChapterCaptions();
     updateDocSize();
     app.onLayout && app.onLayout();
   };
+  // Bölüm numaralı şekil yazıları metin değişince (başlık eklenir, silinir, resmin önüne ya da ardına geçer) yeniden
+  // numaralanır
+  function refreshChapterCaptions() {
+    if (!state.images.some((i) => i.caption && i.caption.chapter)) return;
+    const nums = app.captionNumbers();
+    for (const img of state.images) {
+      const el = img.caption && els.doc.querySelector(`.cap[data-id="${img.id}"] .cap-num`);
+      if (!el || el.textContent === `${img.caption.label || 'Şekil'} ${nums.get(img.id).text}.`) continue;
+      const h = capH.get(img.id);
+      placeCaption(img, clipFor(img), nums);
+      if (capH.get(img.id) !== h) {
+        // Yazının yüksekliği değişti (satıra sığmadı): o sayfanın şeritleri yeniden kurulsun
+        app.markDirty(img.page, img.page);
+        app.scheduleLayout();
+      }
+    }
+  }
 
   let layoutQueued = false;
   app.scheduleLayout = function () {

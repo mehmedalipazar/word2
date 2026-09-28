@@ -48,6 +48,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   (içindekiler satırı gibi). Cetvelin solundaki kutu durağın türünü seçer, cetvele tıklamak seçili paragraflara durak
   koyar; durak sürüklenerek taşınır, cetvelin dışına sürüklenince kalkar, çift tık **Sekmeler** penceresini açar
   (Paragraf penceresinde de "Sekmeler…"). Son durağın ötesinde Word'deki gibi her 1,27 cm'de bir durak vardır.
+  Ondalık durak virgüle hizalar; virgülsüz sayı ("3.250", "150") durakta biter.
   Resmî yazıdaki "Sayı … ⇥ Tarih" (sağa durak) ve ortalı imza bloğu Word'den böyle gelir, Word'e böyle gider.
 - **Başlık numaralandırması** (liste düğmelerinin yanındaki kutu; Word'ün Çok Düzeyli Liste'si): "1. / 1.1. / 1.1.1.",
   "1 / 1.1 / 1.1.1" ya da "I. / A. / 1." Başlık 1–3'e bağlanır. Numara metne yazılmaz: başlık eklenince, silinince ya
@@ -56,6 +57,11 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   başlıklara verilmiş numaraları böyle açılır, Word'e başlık stillerine bağlı liste olarak gider.
 - Listeler Word'ün asılı girintisiyle (işaret 0,63 cm, metin 1,27 cm; alt düzeyler 1,27 cm içeride, •/o/▪ ve 1./a./i.);
   maddenin başında Backspace önce işareti kaldırır (metin yerinde kalır), numara sonraki maddelerde sürer.
+- **Liste biçimi** (liste düğmelerinin yanındaki kutu; Word'ün Madde İşareti / Numaralandırma kitaplığı):
+  • – ▪ ➢ ✓ ❖ o madde işaretleri, 1. / 1) / a) / a. / A. / I. / i. / (1) numaraları ve çok düzeyli 1. / 1.1. / 1.1.1.
+  Biçim seçili maddelerin düzeyine uygulanır, alt düzeyler (Tab) çok düzeyli biçimi alır. "Numaralandırma değerini
+  ayarla…" listeyi istenen numaradan başlatır (ortadaki maddede listeyi böler). Word'den açılan a) / I. / 1) / 1.1. /
+  tire listeleri biçimleriyle gelir, ayrı listeler ayrı kalır; Word'e de aynı biçimle gider.
   Liste düğmesiyle kaldırılan her madde ayrı paragraf olur; seçilmeyen maddeler liste olarak kalır ve yeniden numaralanır.
 - Paragraf başında Backspace: önce ilk satır girintisini, sonra sol girintiyi azaltır; sayfa sonundan sonra sayfa sonunu siler
 - **Sayfalama Word gibi**: dul/öksüz satır denetimi (paragrafın ilk ya da son satırı sayfada tek kalmaz), başlıklar
@@ -73,16 +79,20 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 - Akıllı kılavuzlar: sayfa kenarına, kenar boşluğuna, sayfa ortasına ve diğer resimlere yapışma (Alt ile geçici kapatılır); isteğe bağlı 0,5 cm ızgara
 - Hizala/dağıt, öne/arkaya, kilitle, çoğalt, cm cinsinden X/Y/Genişlik/Yükseklik/Açı
 - **Şekil yazısı** ("Şekil 1. …"): resme bağlıdır, resimle birlikte taşınır; numaralar belge sırasına göre
-  kendiliğinden güncellenir (Şekil, Harita, Fotoğraf, Grafik… her etiket ayrı sayılır); resmin altında ya da üstünde
+  kendiliğinden güncellenir (Şekil, Harita, Fotoğraf, Grafik… her etiket ayrı sayılır); resmin altında ya da üstünde.
+  **Bölüme göre numara** (bağlam çubuğundaki kutu): "Şekil 2.1" (Başlık 1'in numarası + sıra, her bölümde yeniden
+  başlar); Word'ün "Bölüm numarasını ekle"li yazıları böyle açılır, Word'e alanlarıyla gider
 - **Sayfa sonu** (Ctrl+Enter): sonraki metin yeni sayfadan başlar; liste maddesinde listeyi böler (numara sürer)
 - Tek geri alma geçmişi (metin + resim işlemleri birlikte)
+- **Simge** (Ω düğmesi): son kullanılanlar, birim ve matematik işaretleri (° ± × ≤ ≥ ‰ µ Ω …), Yunan harfleri, oklar,
+  noktalama ve para işaretleri; karakter kodu da yazılabilir. Word'deki gibi metinde kodu yazıp Alt+X (00B0 → °).
 - **Sözcük sayısı**: durum çubuğunda; metin seçiliyken "seçili / toplam" (ör. "7 / 1.250 sözcük"). Sayıya tıklamak
   (ya da Ctrl+Shift+G) sayfa, sözcük, karakter (boşluklu/boşluksuz), paragraf ve satır sayısını gösterir.
 - Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
   son yazılanlar da korunur; kaydedilmemiş değişiklik varken kapatma/yenilemede tarayıcı uyarır. Kapanan sekmenin
   belgesi, sonra açılan yeni sekmede geri gelir.
-- **Word belgesi açma (.docx)**: metin, başlıklar (numaralarıyla), biçimler, listeler (düzeyleriyle; araya paragraf girse
-  de numara sürer), satır aralıkları, girintiler, sekme durakları, sayfa ayarları, üst/alt bilgi (metin ve sayfa numarası), resimler
+- **Word belgesi açma (.docx)**: metin, başlıklar (numaralarıyla), biçimler, listeler (düzeyleri ve biçimleriyle: a), I.,
+  1.1., –…; araya paragraf girse de numara sürer), satır aralıkları, girintiler, sekme durakları, sayfa ayarları, üst/alt bilgi (metin ve sayfa numarası), resimler
   (kırpma/döndürme/metin kaydırma dahil). Resmin hemen altındaki "Şekil 3. …" paragrafı ya da resimle gruplanmış
   yazı kutusu, o resmin şekil yazısı olarak gelir. "Aç" düğmesiyle ya da dosyayı sayfaya sürükleyerek.
 - **Word'e aktar (.docx)**: resimler sayfaya göre mutlak konumla yazılır; çapa, resmin sayfasında başlayan bir
@@ -111,6 +121,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 | Ctrl+M / Ctrl+Shift+M | Girintiyi artır / azalt |
 | Ctrl+Shift+L | Madde işaretleri |
 | Ctrl+Shift+G | Sözcük sayısı |
+| Alt+X | İmlecin önündeki onaltılık kodu karaktere çevir (00B0 → °) ya da karakteri koduna |
 | Tab | Metnin içinde sekme; maddenin başında alt düzeye in; birden çok paragraf seçiliyse girinti |
 | Shift+Tab | Maddede üst düzeye çık; paragrafın başında girintiyi azalt |
 | Oklar (Shift: 10 px) | Seçili resmi ince ayarla kaydır |
@@ -143,8 +154,8 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   satırı alınır, kalanı açılışta bildirilir.
 - Çubuk sekme durağı ve belgeye özgü varsayılan durak aralığı yoktur (varsayılan duraklar her 1,27 cm'de).
   Word'ün "Tam" satır aralığı "En az" olarak alınır.
-- Çok düzeyli listelerde numaralar düzey başına ayrıdır (1., a., i.); "1.1." gibi birleşik numaralar yalnızca başlık
-  numaralandırmasında vardır. Başlık numaralandırması üç düzeylidir (Word'ün Başlık 4–9'u Başlık 3 olur, numarası metne
+- Liste girintisi standarttır (her düzey 1,27 cm); Word listesinin kendi girintisi alınmaz. "%1.%2)" gibi düzeyleri
+  farklı biçimde gösteren numaralar editörde tek biçimle çizilir (Word'e aynen gider). Başlık numaralandırması üç düzeylidir (Word'ün Başlık 4–9'u Başlık 3 olur, numarası metne
   yazılır); Word'de ortada yeniden başlatılmış başlık numaraları editöre metin olarak gelir.
 - Eski `.doc` biçimi açılamaz; Word'de ".docx" olarak kaydedin.
 - Köprüler yalnızca web (`http`, `https`) ve e-posta (`mailto`) adresleri içindir; belge içi (yer imi) köprüler yok,
@@ -152,7 +163,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 - Stil listesi Normal ve Başlık 1–3'tür; Word'ün "Konu Başlığı" gibi diğer stilleri biçimleriyle Normal paragraf olur.
   Stilde girinti ve "En az/Tam" satır aralığı yoktur (bunlar paragraf biçimi olarak kalır).
 - Kırpmada oran seçenekleri (1:1, 4:3…), sayıyla kırpma ve dışa doğru kırpma yok.
-- Şekil numaraları düz sayıdır (1, 2, 3…); Word'deki "Şekil 2.3" gibi bölüm numaralı yazılar düz numaraya döner.
+- Şekil yazısında bölüm numarası yalnızca Başlık 1'e göredir (Word'ün Başlık 2–9 seçeneği yok).
 - Word/LibreOffice satırları tarayıcıdan biraz farklı kırabilir; uzun belgelerde sayfa sonları birkaç satır kayabilir (resimler yerinde kalır).
 - Kare kaydırmada metin resmin yalnızca geniş tarafından akar (Word'deki "En geniş taraf").
 - Chrome ve Edge için yazıldı.

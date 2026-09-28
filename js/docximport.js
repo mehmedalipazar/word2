@@ -179,6 +179,25 @@
     }
     return s;
   };
+  // Liste düzeyinin editördeki biçimi (core.js: data-lf). Word'ün Symbol/Wingdings madde işaretleri (özel kullanım
+  // alanında U+F0xx ya da Latin-1 kodla) Unicode karşılığına çevrilir; desteklenmeyen sayı biçimi ondalık olur.
+  const WINGDINGS = { 0xa7: '▪', 0x76: '❖', 0xd8: '➢', 0xfc: '✓', 0x6c: '●', 0x75: '◆', 0x6e: '■', 0xa8: '◻', 0x71: '❑', 0x9f: '•', 0xa1: '○', 0xe0: '➔' };
+  const SYMBOL = { 0xb7: '•' };
+  function bulletChar(text, font) {
+    const code = (text || '').codePointAt(0);
+    const priv = code >= 0xf000 && code <= 0xf0ff;
+    const c = priv ? code - 0xf000 : code;
+    if (/wingdings/i.test(font)) return WINGDINGS[c] || '•';
+    if (/symbol/i.test(font) || priv) return SYMBOL[c] || '•';
+    return c >= 0x20 ? [...text].slice(0, 2).join('').replace(/[;|]/g, '') || '•' : '•';
+  }
+  function lfOf(L) {
+    if (L.fmt === 'bullet') return { fmt: 'bullet', text: bulletChar(L.text, L.font) };
+    // eslint-disable-next-line no-control-regex
+    const text = L.text.replace(/[;|\u0000-\u001f]/g, '').slice(0, 30);
+    return text ? { fmt: app.NUM_FMTS[L.fmt] ? L.fmt : 'decimal', text } : null;
+  }
+
   function fmtNum(n, fmt) {
     if (fmt === 'decimalZero') return String(n).padStart(2, '0');
     if (fmt === 'lowerLetter') return letter(n);
@@ -208,6 +227,7 @@
           hang: hang ? +hang / 20 : first ? -first / 20 : 0, // pt (eksi: ilk satır girintisi)
           suff: wa(kid(l, W, 'suff'), 'val') || 'tab',
           lgl: !!kid(l, W, 'isLgl') && onOff(kid(l, W, 'isLgl')),
+          font: wa(kid(kid(l, W, 'rPr'), W, 'rFonts'), 'ascii') || wa(kid(kid(l, W, 'rPr'), W, 'rFonts'), 'hAnsi') || '', // madde işaretinin yazı tipi
         });
       }
       abs.set(wa(a, 'abstractNumId'), lv);
@@ -345,6 +365,7 @@
         }
         case 'outlineLvl': o.outline = +wa(c, 'val'); break;
         case 'pageBreakBefore': o.pbBefore = onOff(c); break;
+        case 'contextualSpacing': o.ctxSpacing = onOff(c); break; // aynı stildeki paragraflar arasında aralık yok
         case 'tabs': {
           // Özel sekme durakları: stil zincirindekilere paragrafınkiler eklenir, "clear" olanı kaldırır (kopya üzerinde)
           const TYPE = { left: 'l', start: 'l', center: 'c', right: 'r', end: 'r', decimal: 'd' };
@@ -403,7 +424,13 @@
       return [k, { font: s.font, sz: s.size, b: s.bold, i: s.italic, color: s.color, align: s.align, mt: s.before, mb: s.after, lh: app.styleLineHeight(s) }];
     }));
 
-  const CAPTION_RE = /^\s*(Şekil|Sekil|Figure|Fig\.?|Harita|Fotoğraf|Foto|Resim|Grafik|Tablo|Table|Çizelge|Levha)\s*[-–]?\s*([0-9]+(?:[.\-–][0-9]+)*)\s*[.:\-–)]?\s*/i;
+  const CAPTION_RE = /^\s*(Şekil|Sekil|Figure|Fig\.?|Harita|Fotoğraf|Foto|Resim|Grafik|Tablo|Table|Çizelge|Levha)\s*[-–]?\s*([0-9]+(?:[.\-–—][0-9]+)*)\s*[.:\-–)]?\s*/i;
+  // "Şekil 2.1" (Word: STYLEREF 1 \s + ayırıcı + SEQ … \s 1): bölüm numaralı yazı (core.js: caption.chapter = ayırıcı).
+  // num: belgedeki numara; açılışta editörün bulduğu numarayla karşılaştırılır (placeAll)
+  const capNum = (n) => {
+    const sep = /^\d+([.\-–—])\d+$/.exec(n);
+    return sep ? { chapter: sep[1], num: n } : { num: n };
+  };
   const normLabel = (l) => {
     const s = l.replace(/\.$/, '');
     if (/^(sekil|figure|fig)$/i.test(s)) return 'Şekil';
@@ -446,10 +473,13 @@
       const ilvl = pp.ilvl || 0;
       const text = ctx.numbering.next(pp.numId, ilvl);
       const fmt = ctx.numbering.fmt(pp.numId, ilvl);
-      // indent: görsel düzey için (renderBlocks); value: numaralı listenin bu maddedeki sayacı (start için)
+      // indent: görsel düzey için (renderBlocks); value: numaralı listenin bu maddedeki sayacı (start için);
+      // abs: Word'deki liste tanımı (ayrı listeler ayrı kalır); lf: düzeyin biçimi (a), I., –…)
       const lvLeft = ctx.numbering.left(pp.numId, ilvl);
+      const L = ctx.numbering.level(pp.numId, ilvl);
       if (fmt && fmt !== 'none')
-        list = { ordered: fmt !== 'bullet', ilvl, indent: pp.left !== undefined ? pp.left : lvLeft, value: ctx.numbering.count(pp.numId, ilvl) };
+        list = { ordered: fmt !== 'bullet', ilvl, indent: pp.left !== undefined ? pp.left : lvLeft, value: ctx.numbering.count(pp.numId, ilvl),
+          abs: L ? L.abs : null, lf: L ? lfOf(L) : null, style: pp.ctxSpacing ? styleId : null };
       hnum = { numId: pp.numId, ilvl, text }; // başlığın numarası (headingNumbering)
     }
     const tag = heading ? 'h' + Math.min(heading, 3) : 'p';
@@ -696,6 +726,7 @@
         label: m ? normLabel(m[1]) : 'Şekil',
         text: m ? text.slice(m[0].length).trim() : text,
         pos: above ? 'above' : 'below',
+        ...(m ? capNum(m[2]) : {}),
       };
       ctx.report.captions++;
       return;
@@ -857,7 +888,7 @@
       if (!b || b.type !== 'p' || b.list || b.used || b.parts.some((x) => x.t === 'ph')) return null;
       const text = b.parts.filter((x) => x.t === 'text').map((x) => x.text).join('').replace(/\s+/g, ' ').trim();
       const m = CAPTION_RE.exec(text);
-      if (m) return { label: normLabel(m[1]), text: text.slice(m[0].length).trim() };
+      if (m) return { label: normLabel(m[1]), text: text.slice(m[0].length).trim(), ...capNum(m[2]) };
       return b.caption && text ? { label: 'Şekil', text } : null;
     };
     const lastImg = (b) => {
@@ -999,6 +1030,7 @@
 
     const root = document.createElement('div');
     let stack = [];
+    const owners = []; // biçim taşıyan listeler: { el, abs, base, levels }
     const fill = (el, b) => {
       const tagBase = TAG[b.tag] || TAG.p;
       const rb = b.rb || tagBase;
@@ -1027,9 +1059,11 @@
       if (b.pp && b.pp.tabs && b.pp.tabs.length) el.setAttribute('data-tabs', app.formatTabs(b.pp.tabs)); // özel sekme durakları
       if (b.noNum) el.setAttribute('data-num', '0'); // numaralı başlık düzeyinde numarasız başlık
     };
+    let last = null; // hemen önceki liste maddesi: { top: üst düzey listesi, style }
     for (const b of blocks) {
       if (b.type === 'pb') {
         stack = [];
+        last = null;
         const pb = document.createElement('div');
         pb.className = 'pb';
         pb.contentEditable = 'false';
@@ -1038,6 +1072,7 @@
       }
       if (!b.list) {
         stack = [];
+        last = null;
         const el = document.createElement(b.tag);
         fill(el, b);
         root.appendChild(el);
@@ -1046,18 +1081,44 @@
       const lvl = Math.min(b.list.level ?? b.list.ilvl, 8);
       while (stack.length > lvl + 1) stack.pop();
       if (stack.length === lvl + 1 && stack[lvl].ordered !== b.list.ordered) stack.pop();
+      // Word'deki ayrı liste (başka liste tanımı ya da yeniden başlayan numara) editörde de ayrı liste olur
+      if (lvl === 0 && stack.length && (stack[0].owner.abs !== b.list.abs || (b.list.ordered && b.list.value !== stack[0].value + 1))) stack = [];
       while (stack.length < lvl + 1) {
         const L = document.createElement(b.list.ordered ? 'ol' : 'ul');
         // Araya paragraf girip devam eden Word listesi kaldığı numaradan sürer
         if (b.list.ordered && stack.length === lvl && b.list.value > 1) L.setAttribute('start', b.list.value);
         const top = stack[stack.length - 1];
         (top ? top.lastLi || top.el : root).appendChild(L);
-        stack.push({ el: L, ordered: b.list.ordered, lastLi: null });
+        // Bitişik iki liste aynı stilde ve stil "aynı stildeki paragraflar arasına aralık ekleme" diyorsa aralarında boşluk yok
+        if (!top && last && last.style && last.style === b.list.style) {
+          last.top.style.marginBottom = '0';
+          L.style.marginTop = '0';
+        }
+        // Biçimin sahibi: üst düzey liste; içeride başka bir Word listesinden gelen liste kendi biçimini taşır
+        const d = stack.length;
+        let owner = top && top.owner;
+        if (!owner || owner.abs !== b.list.abs) owners.push((owner = { el: L, abs: b.list.abs, base: d, levels: [] }));
+        stack.push({ el: L, ordered: b.list.ordered, lastLi: null, owner, value: 0 });
       }
+      const s = stack[stack.length - 1];
+      // Düzeyin biçimi, sahibinin göreli düzeyine (Word'ün %n'leri bu düzeye kaydırılarak)
+      const r = lvl - s.owner.base;
+      if (!s.owner.levels[r] && b.list.lf) s.owner.levels[r] = app.shiftLevel(b.list.lf, r - b.list.ilvl);
       const li = document.createElement('li');
       fill(li, b);
-      stack[stack.length - 1].el.appendChild(li);
-      stack[stack.length - 1].lastLi = li;
+      s.el.appendChild(li);
+      s.lastLi = li;
+      s.value = b.list.value;
+      last = { top: stack[0].el, style: b.list.style };
+    }
+    // Varsayılandan (1. a. i. / • o ▪) farklı düzeyler listenin data-lf'sine yazılır
+    for (const o of owners) {
+      const levels = o.levels.map((L, r) => {
+        const D = L && app.defaultLevel(o.base + r, L.fmt !== 'bullet');
+        return L && !(L.fmt === D.fmt && (L.fmt === 'bullet' ? L.text === D.text : L.text === `%${r + 1}.`)) ? L : null;
+      });
+      const v = app.formatLF(levels);
+      if (v) o.el.setAttribute('data-lf', v);
     }
     return root.innerHTML;
   }
@@ -1241,7 +1302,7 @@
     return { page, y: y0 + (p.off || 0) };
   }
 
-  function placeOne(r, m, z) {
+  function placeOne(r, m, z, ctx) {
     const g = app.geom();
     let w = r.w;
     let h = r.h;
@@ -1278,7 +1339,11 @@
     }
     const img = { id: SS.uid('img'), asset: r.asset, page: Math.max(0, page), x, y, w, h, rot: r.rot || 0, wrap, locked: false, z };
     if (r.crop) img.crop = r.crop.slice();
-    if (r.caption) img.caption = { ...r.caption };
+    if (r.caption) {
+      const { num, ...cap } = r.caption;
+      img.caption = cap;
+      if (num) ctx.capNums.set(img.id, num);
+    }
     app.clampToPage(img);
     app.state.images.push(img);
   }
@@ -1329,7 +1394,7 @@
           phX: toDoc(pr.left, d.left),
           align: getComputedStyle(block).textAlign,
         };
-        for (const r of recs) placeOne(r, m, zOf.get(r.id));
+        for (const r of recs) placeOne(r, m, zOf.get(r.id), ctx);
         ctx.report.images += recs.length;
       }
       ph.remove();
@@ -1373,7 +1438,8 @@
       fldHref: null, // HYPERLINK alanının adresi
       pendingBoxes: [],
       lastImage: null,
-      report: { images: 0, captions: 0, tables: 0, textboxes: 0, charts: 0, other: 0, skipped: 0, unsupported: 0, notes: 0 },
+      report: { images: 0, captions: 0, tables: 0, textboxes: 0, charts: 0, other: 0, skipped: 0, unsupported: 0, notes: 0, capRenum: 0 },
+      capNums: new Map(), // resim → belgedeki şekil numarası
     };
     const blocks = attachCaptions(walkBody(body, ctx), ctx);
     const styles = importStyles(ctx, headingNumbering(blocks, ctx));
@@ -1391,6 +1457,10 @@
     app.load({ app: 'SerbestSayfa', title, page, hf: hfRes.hf, styles, html, images: [], assets });
     placeAll(ctx);
     app.relayoutAll();
+    // Şekil yazılarının numarası editörde yeniden sayılır. Bölüm numaralı ("2.1") ya da daha çok parçalı numara
+    // belgedekinden farklı çıkarsa bildirilir (düz numaralarda Word'ün SEQ alanlarının sonucu çoğu zaman eskidir)
+    const nums = app.captionNumbers();
+    ctx.capNums.forEach((n, id) => /\D/.test(n) && nums.has(id) && nums.get(id).text !== n && ctx.report.capRenum++);
     app.resetHistory();
     app.onLoad && app.onLoad();
     return ctx.report;
@@ -1404,6 +1474,7 @@
     if (rep.hf) done.push('üst/alt bilgi');
     const notes = [];
     if (rep.hfLost) notes.push(`üst/alt bilgideki ${rep.hfLost} öğe (resim, tablo, ek satır ya da kapağa özel içerik) alınamadı`);
+    if (rep.capRenum) notes.push(`${rep.capRenum} şekil yazısının numarası belgedekinden farklı (numaralar belge sırasına göre yeniden sayıldı)`);
     if (rep.tables) notes.push(`${rep.tables} tablo düz metne dönüştürüldü`);
     if (rep.textboxes) notes.push(`${rep.textboxes} metin kutusu paragrafa dönüştürüldü`);
     if (rep.unsupported) notes.push(`${rep.unsupported} resim desteklenmeyen biçimde (EMF/WMF/TIFF) olduğu için alınamadı`);

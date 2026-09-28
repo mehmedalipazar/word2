@@ -85,13 +85,25 @@
   }
 
   // ---------- Numaralandırma ----------
+  // Madde işaretleri Word'deki yazı tipi ve karakteriyle (içe aktarmada da bunlar Unicode karşılığına çevrilir)
+  const BULLET_FONT = { '•': ['&#xF0B7;', 'Symbol'], o: ['o', 'Courier New'], '▪': ['&#xF0A7;', 'Wingdings'], '❖': ['&#xF076;', 'Wingdings'],
+    '➢': ['&#xF0D8;', 'Wingdings'], '✓': ['&#xF0FC;', 'Wingdings'], '●': ['&#xF06C;', 'Wingdings'], '◆': ['&#xF075;', 'Wingdings'],
+    '■': ['&#xF06E;', 'Wingdings'], '◻': ['&#xF0A8;', 'Wingdings'], '❑': ['&#xF071;', 'Wingdings'], '➔': ['&#xF0E0;', 'Wingdings'] };
   function makeNumbering() {
-    const nums = []; // { id, ordered, start } ya da başlık listesi { id, heads }
+    const nums = []; // { id, ordered, start } ya da başlık listesi { id, heads } ya da biçimli liste { id, abs, start, ilvl }
     let heads = null;
+    const customs = new Map(); // biçimli liste tanımı (JSON) → abstractNumId (3'ten)
     return {
-      add(ordered, start = 1) {
+      // def: biçimli listenin 9 düzeyi (core.js: data-lf, Word'ün düzey numaralarıyla); yoksa Word'ün varsayılan listesi.
+      // Numaralı liste başlangıcını kendi düzeyinde (ilvl) alır: ayrı listeler aynı tanımı paylaşsa da baştan sayar.
+      add(ordered, start = 1, def = null, ilvl = 0) {
         const id = nums.length + 1;
-        nums.push({ id, ordered, start });
+        if (!def) nums.push({ id, ordered, start });
+        else {
+          const key = JSON.stringify(def);
+          if (!customs.has(key)) customs.set(key, { id: 3 + customs.size, def });
+          nums.push({ id, ordered, start, ilvl, abs: customs.get(key).id });
+        }
         return id;
       },
       // Başlık numaralandırması (core.js: styles.num): düzeyleri Başlık 1–3 stillerine bağlı çok düzeyli liste
@@ -127,19 +139,33 @@
           }
           return s;
         };
+        // Biçimli liste: düzeyler tanımdan (a), I., –, 1.1. …), girintiler varsayılan listeyle aynı
+        const customLvls = (def) =>
+          def.map((L, i) => {
+            const ind = `<w:pPr><w:ind w:left="${720 * (i + 1)}" w:hanging="360"/></w:pPr>`;
+            if (L.fmt !== 'bullet')
+              return `<w:lvl w:ilvl="${i}"><w:start w:val="1"/><w:numFmt w:val="${L.fmt}"/><w:lvlText w:val="${esc(L.text)}"/><w:lvlJc w:val="left"/>${ind}</w:lvl>`;
+            const [chr, font] = BULLET_FONT[L.text] || [esc(L.text), null];
+            const rPr = font ? `<w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:hint="default"/></w:rPr>` : '';
+            return `<w:lvl w:ilvl="${i}"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="${chr}"/><w:lvlJc w:val="left"/>${ind}${rPr}</w:lvl>`;
+          }).join('');
+        const multi = (def) => (def.some((L) => L.fmt !== 'bullet' && (L.text.match(/%[1-9]/g) || []).length > 1) ? 'multilevel' : 'hybridMultilevel');
         return (
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
           '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
           `<w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${lvls(false)}</w:abstractNum>` +
           `<w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${lvls(true)}</w:abstractNum>` +
           (heads ? `<w:abstractNum w:abstractNumId="2"><w:multiLevelType w:val="multilevel"/>${headLvls()}</w:abstractNum>` : '') +
+          [...customs.values()].map((c) => `<w:abstractNum w:abstractNumId="${c.id}"><w:multiLevelType w:val="${multi(c.def)}"/>${customLvls(c.def)}</w:abstractNum>`).join('') +
           nums
             .map((n) =>
               n.heads
                 ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="2"/></w:num>`
-                : n.ordered
-                  ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${n.start}"/></w:lvlOverride></w:num>`
-                  : `<w:num w:numId="${n.id}"><w:abstractNumId w:val="0"/></w:num>`
+                : n.abs
+                  ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="${n.abs}"/>${n.ordered ? `<w:lvlOverride w:ilvl="${n.ilvl}"><w:startOverride w:val="${n.start}"/></w:lvlOverride>` : ''}</w:num>`
+                  : n.ordered
+                    ? `<w:num w:numId="${n.id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${n.start}"/></w:lvlOverride></w:num>`
+                    : `<w:num w:numId="${n.id}"><w:abstractNumId w:val="0"/></w:num>`
             )
             .join('') +
           '</w:numbering>'
@@ -230,10 +256,15 @@
         mode === 'square' ? '<wp:wrapSquare wrapText="largest"/>' : mode === 'topbottom' ? '<wp:wrapTopAndBottom/>' : '<wp:wrapNone/>';
       const bold = '<w:rPr><w:b/><w:bCs/></w:rPr>';
       const text = clean(img.caption.text || '');
+      const num = capNums.get(img.id) || { n: 1, ch: null };
+      // Bölüm numaralı: Word'ün "Bölüm numarasını ekle"si gibi STYLEREF 1 \s + ayırıcı + SEQ … \s 1
+      const chapter = num.ch !== null
+        ? `<w:fldSimple w:instr=" STYLEREF 1 \\s "><w:r>${bold}<w:t>${esc(num.ch)}</w:t></w:r></w:fldSimple><w:r>${bold}<w:t>${esc(num.sep)}</w:t></w:r>`
+        : '';
       const para =
         '<w:p><w:pPr><w:pStyle w:val="Caption"/><w:spacing w:before="0" w:after="0"/><w:jc w:val="center"/></w:pPr>' +
-        `<w:r>${bold}<w:t xml:space="preserve">${esc(label)} </w:t></w:r>` +
-        `<w:fldSimple w:instr=" SEQ ${esc(label.replace(/\s+/g, '_'))} \\* ARABIC "><w:r>${bold}<w:t>${capNums.get(img.id) || 1}</w:t></w:r></w:fldSimple>` +
+        `<w:r>${bold}<w:t xml:space="preserve">${esc(label)} </w:t></w:r>` + chapter +
+        `<w:fldSimple w:instr=" SEQ ${esc(label.replace(/\s+/g, '_'))} \\* ARABIC${num.ch !== null ? ' \\s 1' : ''} "><w:r>${bold}<w:t>${num.n}</w:t></w:r></w:fldSimple>` +
         `<w:r>${bold}<w:t xml:space="preserve">.</w:t></w:r>` +
         (text ? `<w:r><w:t xml:space="preserve"> ${esc(text)}</w:t></w:r>` : '') +
         '</w:p>';
@@ -535,8 +566,25 @@
           const ordered = tag === 'OL';
           const depth = listCtx ? listCtx.depth + 1 : 0;
           const start = ordered ? Math.max(1, parseInt(n.getAttribute('start'), 10) || 1) : 1; // bölünen listede numara devam eder
-          const numId = listCtx && listCtx.ordered === ordered ? listCtx.numId : numbering.add(ordered, start);
-          const ctx = { ordered, depth, numId };
+          // Liste biçimi (core.js: data-lf): kendi biçimi Word düzeylerine kaydırılarak üst listenin tanımına işlenir;
+          // biçimsiz alt liste üst listenin tanımını (bu düzeyi türü tutuyorsa) paylaşır. Hiç biçim yoksa Word'ün
+          // varsayılan listesi (eski davranış).
+          const own = app.parseLF(n.getAttribute('data-lf'));
+          const hasOwn = own.some(Boolean);
+          let def = listCtx ? listCtx.def : null;
+          if (hasOwn) {
+            def = (def || Array.from({ length: 9 }, (_, i) => app.shiftLevel(app.defaultLevel(i % 3, ordered), i - (i % 3)))).slice();
+            own.forEach((L, r) => L && depth + r < 9 && (def[depth + r] = app.shiftLevel(L, depth)));
+          }
+          const fits = !!(def && def[depth] && (def[depth].fmt !== 'bullet') === ordered);
+          let numId;
+          if (listCtx && listCtx.ordered === ordered && !hasOwn && (!def || fits)) numId = listCtx.numId;
+          else if (fits) numId = numbering.add(ordered, start, def, depth);
+          else {
+            numId = numbering.add(ordered, start);
+            def = null;
+          }
+          const ctx = { ordered, depth, numId, def };
           // Chrome'un girinti komutu alt listeyi maddenin içine değil listenin kendisine koyar: <ul><li/><ul>…</ul></ul>
           const items = [...n.children].filter((c) => /^(LI|UL|OL)$/.test(c.tagName));
           const lcs = getComputedStyle(n);

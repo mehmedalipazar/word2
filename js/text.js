@@ -12,6 +12,7 @@
   const blockSel = $('blockStyle');
   const lineHeightSel = $('lineHeight');
   const headNumSel = $('headingNum');
+  const listFmtSel = $('listFmt');
 
   document.execCommand('defaultParagraphSeparator', false, 'p');
   document.execCommand('styleWithCSS', false, true);
@@ -91,8 +92,23 @@
     focusEditor();
     if (/^insert(Ordered|Unordered)List$/.test(cmd) && removeList(cmd === 'insertOrderedList' ? 'OL' : 'UL')) return afterFormat();
     app.withoutBands(() => document.execCommand(cmd, false, value));
+    if (/List$/.test(cmd)) refreshLists();
     afterFormat();
   };
+  // Chrome girinti ya da liste komutundan sonra (ol > ol biçiminde) sonraki maddelerin numarasını güncellemiyor
+  // (1. 2. a. 4.): seçimin geçtiği listelerin düzeni bir anlık display: none ile yeniden kurulur
+  function refreshLists() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const r = sel.getRangeAt(0);
+    for (const L of ed.querySelectorAll(':scope > ol, :scope > ul')) {
+      if (!r.intersectsNode(L)) continue;
+      L.style.display = 'none';
+      void L.offsetHeight;
+      L.style.display = '';
+      if (!L.getAttribute('style')) L.removeAttribute('style');
+    }
+  }
 
   // ---------- Numarayı / madde işaretini kaldırma (Word gibi) ----------
   // Chrome listeyi kaldırırken maddeleri <br> ile tek paragrafta birleştiriyor, alt düzeyi numaralı
@@ -164,6 +180,7 @@
         const d = stack.length;
         const src = d === it.depth ? it.list : items.find((x) => x.depth === d && x.list.contains(it.li))?.list || it.list;
         const el = document.createElement(src.tagName.toLowerCase());
+        if (src.getAttribute('data-lf')) el.setAttribute('data-lf', src.getAttribute('data-lf')); // liste biçimi
         const n = kept.get(src) || 0;
         const start = (parseInt(src.getAttribute('start'), 10) || 1) + n;
         if (src.tagName === 'OL' && start > 1) el.setAttribute('start', start);
@@ -279,6 +296,7 @@
     if (blocks.some((b) => b.tagName === 'LI')) {
       const known = new Set(ed.querySelectorAll('span'));
       app.withoutBands(() => document.execCommand(dir > 0 ? 'indent' : 'outdent'));
+      refreshLists();
       // Chrome üst düzeye çıkardığı maddenin metnini aynı puntoyla span'a sarıyor; stil sonradan değişince eski
       // punto kalmasın diye bu yeni ve gereksiz span'lar açılır
       const extra = [...ed.querySelectorAll('span[style]')].filter((s) => !known.has(s) && s.style.length === 1 && s.style.fontSize &&
@@ -326,6 +344,7 @@
     syncCombos();
     const block = n.closest('h1,h2,h3,p,li,div');
     blockSel.value = block && /^H[123]$/.test(block.tagName) ? block.tagName.toLowerCase() : 'p';
+    syncListFmt(n);
     const skip = headNumSel.querySelector('[value="skip"]');
     skip.disabled = !(N && block && /^H[123]$/.test(block.tagName) && N[block.tagName[1] - 1]);
     skip.text = !skip.disabled && block.getAttribute('data-num') === '0' ? 'Bu başlığı numaralandır' : 'Bu başlığı numaralandırma';
@@ -966,6 +985,163 @@
     } else if (v === '' || app.HEADING_NUMS[v]) app.setStyles(app.cleanStyles({ ...app.state.styles, num: v ? app.HEADING_NUMS[v] : null }));
     updateToolbarState();
   });
+
+  // ---------- Liste biçimi (Word: Madde İşareti / Numaralandırma kitaplığı, Çok Düzeyli Liste) ----------
+  // Seçilen biçim, seçili maddelerin liste düzeyine yazılır (core.js: data-lf, biçimin sahibi: data-lf taşıyan en
+  // yakın üst liste, yoksa en üst liste); tür farklıysa liste ol↔ul olur. İmleç listede değilse paragraflar önce
+  // listeye çevrilir. Çok düzeyli biçim bütün listeye uygulanır. "Numaralandırma değerini ayarla": madde listenin
+  // başındaysa liste o numaradan başlar, ortasındaysa liste o maddeden bölünür (Word gibi).
+  const ONE = { decimal: '1', decimalZero: '01', lowerLetter: 'a', upperLetter: 'A', lowerRoman: 'i', upperRoman: 'I' };
+  const lfSample = (L) => (L.fmt === 'bullet' ? L.text : L.text.replace(/%[1-9]/g, ONE[L.fmt]));
+  // Maddenin listesi, biçimin sahibi ve sahibine göre düzeyi (r), belgede derinliği
+  function listLevel(li) {
+    const chain = [];
+    for (let el = li.parentElement; el && el !== ed; el = el.parentElement) if (/^(OL|UL)$/.test(el.tagName)) chain.push(el);
+    const owner = chain.find((el) => el.hasAttribute('data-lf')) || chain[chain.length - 1];
+    return { list: chain[0], owner, top: chain[chain.length - 1], r: chain.indexOf(owner), depth: chain.length - 1 };
+  }
+  // Maddenin görünen biçimi (sahibinin tanımı, yoksa varsayılan), %1 kendi düzeyi olacak biçimde
+  function levelFormat(li) {
+    const { list, owner, r, depth } = listLevel(li);
+    const L = app.parseLF(owner.getAttribute('data-lf'))[r];
+    const ordered = list.tagName === 'OL';
+    if (L && (L.fmt !== 'bullet') === ordered) return app.shiftLevel(L, -r);
+    return app.shiftLevel(app.defaultLevel(depth, ordered), -depth);
+  }
+  function retag(list, tag) {
+    const el = document.createElement(tag);
+    for (const a of list.attributes) if (!(a.name === 'start' && tag === 'ul')) el.setAttribute(a.name, a.value);
+    while (list.firstChild) el.appendChild(list.firstChild);
+    list.replaceWith(el);
+    return el;
+  }
+  app.setListFormat = function (v) {
+    const levels = app.parseLF(v);
+    if (!levels[0]) return;
+    focusEditor();
+    const ordered = levels[0].fmt !== 'bullet';
+    let items = selectedItems();
+    if (!items.length) {
+      const before = new Set(ed.querySelectorAll('li'));
+      app.withoutBands(() => document.execCommand(ordered ? 'insertOrderedList' : 'insertUnorderedList'));
+      app.normalizeBlocks(); // Chrome listeyi paragrafın içine koyabilir
+      items = selectedItems();
+      if (!items.length) return afterFormat();
+      // Chrome yeni maddeleri bitişik listeye katar; biçimi başkaysa Word'deki gibi ayrı liste olurlar
+      const L = items[0].parentElement;
+      const old = [...L.children].filter((c) => c.tagName === 'LI' && before.has(c));
+      const f = old.length && levelFormat(old[0]);
+      if (f && !(levels.length === 1 && f.fmt === levels[0].fmt && f.text === levels[0].text)) {
+        const pins = app.pinSelection();
+        const own = document.createElement(L.tagName.toLowerCase());
+        const first = [...L.children].find((c) => items.includes(c));
+        const rest = L.cloneNode(false);
+        let n = first;
+        while (n) {
+          const next = n.nextSibling;
+          (n.nodeType === 1 && n.tagName === 'LI' && before.has(n) ? rest : rest.firstChild ? rest : own).appendChild(n);
+          n = next;
+        }
+        L.after(own);
+        if (rest.firstChild) own.after(rest);
+        // Bitişik listeler arasında aralık yok (Word: aynı stildeki liste paragrafları)
+        for (const [a, b] of [[L, own], [own, rest]]) if (a.isConnected && b.isConnected && a.nextElementSibling === b) [a.style.marginBottom, b.style.marginTop] = ['0', '0'];
+        if (!L.firstElementChild) L.remove();
+        app.unpinSelection(pins);
+      }
+    }
+    const pins = app.pinSelection();
+    const done = new Set();
+    for (const li of items) {
+      let { list, owner, top, r } = listLevel(li);
+      if (levels.length > 1) {
+        // Çok düzeyli: bütün liste bu tanımla; içerideki listelerin kendi biçimi kalkar
+        if (done.has(top)) continue;
+        done.add(top);
+        if ((top.tagName === 'OL') !== ordered) top = retag(top, ordered ? 'ol' : 'ul');
+        top.querySelectorAll('[data-lf]').forEach((x) => x.removeAttribute('data-lf'));
+        top.setAttribute('data-lf', v);
+        continue;
+      }
+      if (done.has(list)) continue;
+      if ((list.tagName === 'OL') !== ordered) {
+        const was = list;
+        list = retag(list, ordered ? 'ol' : 'ul');
+        if (owner === was) owner = list;
+        if (top === was) top = list;
+      }
+      done.add(list);
+      const cur = app.parseLF(owner.getAttribute('data-lf'));
+      const depth = listLevel(li).depth;
+      const D = app.shiftLevel(app.defaultLevel(depth, ordered), -depth);
+      // Varsayılanla (1. a. i. / • o ▪) aynıysa düzey boş kalır
+      cur[r] = levels[0].fmt === D.fmt && levels[0].text === D.text ? null : app.shiftLevel(levels[0], r);
+      const s = app.formatLF(cur);
+      if (s) owner.setAttribute('data-lf', s);
+      else owner.removeAttribute('data-lf');
+    }
+    app.unpinSelection(pins);
+    app.normalizeBlocks(); // biçimin CSS'i (core.js: applyListStyles)
+    afterFormat();
+  };
+  // Numaralandırma değerini ayarla
+  const numValDlg = $('numValueDialog');
+  let numValLi = null;
+  function itemNumber(li) {
+    let n = parseInt(li.parentElement.getAttribute('start'), 10) || 1;
+    for (let p = li.previousElementSibling; p; p = p.previousElementSibling) if (p.tagName === 'LI') n++;
+    return n;
+  }
+  app.numberValueDialog = function () {
+    focusEditor();
+    const li = selectedItems()[0];
+    if (!li || li.parentElement.tagName !== 'OL') return SS.toast('Önce numaralı bir listede bir maddeye tıklayın.');
+    numValLi = li;
+    numValDlg.querySelector('[name=value]').value = itemNumber(li);
+    numValDlg.returnValue = '';
+    numValDlg.showModal();
+    numValDlg.querySelector('[name=value]').select();
+  };
+  numValDlg.addEventListener('close', () => {
+    const li = numValLi;
+    numValLi = null;
+    const v = parseInt(numValDlg.querySelector('[name=value]').value, 10);
+    if (numValDlg.returnValue !== 'ok' || !li || !ed.contains(li)) return;
+    focusEditor();
+    if (!(v >= 0 && v <= 32767)) return SS.toast('Numara 0 ile 32767 arasında bir tam sayı olmalı.');
+    const list = li.parentElement;
+    let target = list;
+    if (list.firstElementChild !== li) {
+      // Ortadaki madde: liste bu maddeden bölünür (sonraki maddeler ve alt listeleri yeni listede)
+      const pins = app.pinSelection();
+      target = list.cloneNode(false);
+      while (li.nextSibling) target.appendChild(li.nextSibling);
+      target.prepend(li);
+      list.after(target);
+      [list.style.marginBottom, target.style.marginTop] = ['0', '0']; // tek listeydi: arada aralık olmasın
+      app.unpinSelection(pins);
+    }
+    if (v === 1) target.removeAttribute('start');
+    else target.setAttribute('start', v);
+    afterFormat();
+  });
+  listFmtSel.addEventListener('change', () => {
+    const v = listFmtSel.value;
+    if (v === 'value') app.numberValueDialog();
+    else if (v && v[0] !== '~') app.setListFormat(v);
+    updateToolbarState();
+  });
+  // Araç çubuğunda imlecin maddesinin biçimi (hazır biçim değilse örneğiyle)
+  function syncListFmt(n) {
+    const li = n && n.closest('li');
+    if (!li || !ed.contains(li)) return setSelectValue(listFmtSel, '');
+    const L = levelFormat(li);
+    const v = `${L.fmt}|${L.text}`;
+    const top = listLevel(li).top.getAttribute('data-lf');
+    const multi = [...listFmtSel.options].find((o) => o.value.includes(';') && o.value === top);
+    if (multi) return setSelectValue(listFmtSel, multi.value);
+    setSelectValue(listFmtSel, [...listFmtSel.options].some((o) => o.value === v) ? v : '~' + lfSample(L), lfSample(L));
+  }
   lineHeightSel.addEventListener('change', () => {
     const v = lineHeightSel.value;
     if (v === 'dialog') app.paragraphDialog();
@@ -1398,7 +1574,114 @@
       e.preventDefault();
       tabKey(e.shiftKey);
     }
+    if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyX' && unicodeToggle()) e.preventDefault();
   });
+
+  // ---------- Simge (Word: Ekle > Simge) ----------
+  // Araç çubuğundaki Ω düğmesi simge panelini açar: son kullanılanlar (tarayıcıda saklanır) ve konulara göre
+  // simgeler; tık imlecin yerine ekler (panel açık kalır). Karakter kodu da yazılabilir. Word'deki gibi Alt+X
+  // imlecin önündeki onaltılık kodu karaktere (00B0 → °), karakteri koduna çevirir.
+  const SYMBOLS = [
+    ['Birimler ve matematik', '°±×÷≈≠≤≥∞√∑∆∂∫‰%¹²³¼½¾µΩ′″∠⊥∥∈∩∪'],
+    ['Yunan harfleri', 'αβγδεζηθικλμνξπρστυφχψωΓΔΘΛΞΠΣΦΨ'],
+    ['Oklar', '→←↑↓↔↕⇒⇐⇔↗↘'],
+    ['Noktalama ve para', '–—…«»“”‘’·•§¶©®™€£$¥₺№'],
+    ['Diğer', '✓✗★☆☐☑♂♀†‡'],
+  ];
+  const RECENT_KEY = 'serbestsayfa-simgeler';
+  const symPanel = $('symbolPanel');
+  const symCode = $('symCode');
+  const hexOfChar = (c) => c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+  const symButton = (c) => Object.assign(document.createElement('button'), { className: 'sym', textContent: c, title: 'U+' + hexOfChar(c) });
+  function recentSymbols() {
+    try {
+      const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+      return Array.isArray(a) ? a.filter((c) => typeof c === 'string' && [...c].length === 1).slice(0, 16) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  function fillRecent() {
+    const list = recentSymbols();
+    $('symRecent').replaceChildren(...(list.length ? list : ['°', '±', 'µ', '‰', '×', '≤', '≥', 'Ω']).map(symButton));
+  }
+  app.symbolPanel = function () {
+    if (!symPanel.hidden) return void (symPanel.hidden = true);
+    if (!$('symGroups').childElementCount)
+      for (const [name, chars] of SYMBOLS) {
+        const grid = document.createElement('div');
+        grid.className = 'sym-grid';
+        grid.append(...[...chars].map(symButton));
+        $('symGroups').append(Object.assign(document.createElement('div'), { className: 'sym-sec', textContent: name }), grid);
+      }
+    fillRecent();
+    const tb = document.querySelector('.toolbars').getBoundingClientRect();
+    symPanel.style.top = tb.bottom + 8 + 'px';
+    symPanel.hidden = false;
+  };
+  app.insertSymbol = function (c) {
+    app.clearSelection && app.clearSelection();
+    focusEditor();
+    app.trimParagraphMark();
+    document.execCommand('insertText', false, c);
+    const list = [c, ...recentSymbols().filter((x) => x !== c)].slice(0, 16);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+    } catch (_) { /* depolama kapalı: yalnızca bu oturum */ }
+    if (!symPanel.hidden) fillRecent();
+  };
+  const codeChar = (s) => {
+    const m = /^(?:U\+)?([0-9a-f]{2,6})$/i.exec(s.trim());
+    const n = m ? parseInt(m[1], 16) : NaN;
+    return n >= 0x20 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : null;
+  };
+  symPanel.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.classList.contains('sym')) app.insertSymbol(b.textContent);
+    else if (b.dataset.sym === 'close') symPanel.hidden = true;
+    else if (b.dataset.sym === 'code') {
+      const c = codeChar(symCode.value);
+      if (!c) return SS.toast('Onaltılık bir karakter kodu yazın (ör. 00B0 ya da U+00B0).');
+      app.insertSymbol(c);
+    }
+  });
+  symCode.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      symPanel.querySelector('[data-sym="code"]').click();
+    } else if (e.key === 'Escape') symPanel.hidden = true;
+  });
+  // Alt+X: imlecin önündeki onaltılık kod (U+ olabilir) karaktere, kod yoksa önceki karakter koduna çevrilir
+  function unicodeToggle() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0);
+    const t = r.startContainer;
+    if (t.nodeType !== 3 || !ed.contains(t)) return false;
+    const before = t.nodeValue.slice(0, r.startOffset);
+    // Kod: "U+" ile yazılmışsa tamamı; 5–6 haneli geçerli bir BMP dışı kod; yoksa son 4 hane ("20" + "00b0" → "20°")
+    const run = /(U\+)?([0-9a-fA-F]{2,})$/.exec(before);
+    let hex = run && run[2];
+    if (hex && !run[1] && hex.length > 4) hex = /^[0-9a-f]{5,6}$/i.test(hex) && parseInt(hex, 16) >= 0x10000 && codeChar(hex) ? hex : hex.slice(-4);
+    const c = hex && hex.length <= 6 && codeChar(hex);
+    const range = document.createRange();
+    let text;
+    if (c) {
+      range.setStart(t, r.startOffset - hex.length - (run[1] ? 2 : 0));
+      text = c;
+    } else {
+      const last = [...before].pop();
+      if (!last) return false;
+      range.setStart(t, r.startOffset - last.length);
+      text = hexOfChar(last);
+    }
+    range.setEnd(t, r.startOffset);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('insertText', false, text);
+    return true;
+  }
 
   // ---------- Yapıştırma: Word/web içeriğini sadeleştir ----------
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -1450,6 +1733,42 @@
     return out.length ? app.formatTabs(out) : '';
   }
 
+  // Word'ün panodaki sahte liste işaretinden (mso-list:Ignore) maddenin biçimi (core.js: data-lf; %düzey kendi
+  // numarası), ör. "a)", "IV.", "(1)", "1.2." ya da madde işareti; start: işaretteki değer. Symbol/Wingdings
+  // işaretleri Unicode karşılığına çevrilir.
+  const WD_BULLETS = { '§': '▪', Ø: '➢', ü: '✓', v: '❖', n: '■', l: '●', u: '◆', q: '❑' };
+  const romanValue = (s) => {
+    const V = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+    let n = 0;
+    [...s.toLowerCase()].forEach((c, i, a) => (n += V[c] < (V[a[i + 1]] || 0) ? -V[c] : V[c]));
+    return n;
+  };
+  function wordListFormat(marker, level) {
+    const t = marker ? marker.textContent.replace(/\s+/g, '') : ''; // (\s boşluksuz boşluğu da kapsar)
+    const fonts = marker ? [marker, ...marker.querySelectorAll('span')].map((s) => s.style.fontFamily).join(' ') : '';
+    const multi = /^((?:\d+\.)+\d+)(\.?)$/.exec(t);
+    if (multi) {
+      const parts = multi[1].split('.');
+      const text = parts.map((_, i) => '%' + Math.max(1, level - parts.length + 1 + i)).join('.') + multi[2];
+      return { fmt: 'decimal', text, start: +parts[parts.length - 1] };
+    }
+    // Numara noktalamayla gelir ("a)", "IV.", "(1)"); Courier New'deki "o" gibi işaretler madde işaretidir
+    const m = /^(\(?)(\d+|[a-zA-Z]+)([.)]?)$/.exec(t);
+    if (m && (m[1] || m[3]) && !/courier|symbol|wingdings/i.test(fonts)) {
+      const v = m[2];
+      const up = v === v.toUpperCase();
+      let fmt = 'decimal';
+      let start = +v;
+      if (/^[ivxlcdm]+$/i.test(v) && (v.length > 1 || /^[ivx]$/i.test(v))) [fmt, start] = [up ? 'upperRoman' : 'lowerRoman', romanValue(v)];
+      else if (/^[a-z]$/i.test(v)) [fmt, start] = [up ? 'upperLetter' : 'lowerLetter', v.toLowerCase().charCodeAt(0) - 96];
+      else if (!/^\d+$/.test(v)) return { fmt: 'bullet', text: '•', start: 0 };
+      return { fmt, text: `${m[1]}%${level}${m[3]}`, start };
+    }
+    const c = [...t][0] || '';
+    const text = /wingdings/i.test(fonts) ? WD_BULLETS[c] || '•' : /symbol/i.test(fonts) || !c ? '•' : /courier/i.test(fonts) ? 'o' : c.replace(/[;|]/, '') || '•';
+    return { fmt: 'bullet', text, start: 0 };
+  }
+
   function convertChildren(src, dst, ctx) {
     for (const n of [...src.childNodes]) convertNode(n, dst, ctx);
   }
@@ -1489,10 +1808,12 @@
       const el = document.createElement(listy ? 'li' : BLOCKS[tag]);
       if (listy) {
         const marker = [...n.querySelectorAll('span')].find((s) => /mso-list:\s*ignore/i.test(s.getAttribute('style') || ''));
-        const num = marker && /^\s*([0-9]+|[a-z]|[ivx]+)[.)]/i.exec(marker.textContent);
-        el.dataset.wordList = num ? 'ol' : 'ul';
-        el.dataset.wordLevel = (/mso-list:\s*l\d+\s+level(\d+)/i.exec(style) || [0, 1])[1];
-        if (num && /^\d+$/.test(num[1])) el.dataset.wordStart = num[1];
+        const level = +(/mso-list:\s*l\d+\s+level(\d+)/i.exec(style) || [0, 1])[1];
+        const f = wordListFormat(marker, level);
+        el.dataset.wordList = f.fmt === 'bullet' ? 'ul' : 'ol';
+        el.dataset.wordLevel = level;
+        el.dataset.wordFmt = `${f.fmt}|${f.text}`;
+        if (f.start > 1) el.dataset.wordStart = f.start;
       }
       if (tag === 'OL' && +n.getAttribute('start') > 1) el.setAttribute('start', n.getAttribute('start'));
       const st = n.style;
@@ -1541,6 +1862,7 @@
   function fixList(list) {
     const L = document.createElement(list.tagName.toLowerCase());
     if (list.getAttribute('start')) L.setAttribute('start', list.getAttribute('start'));
+    if (list.getAttribute('data-lf')) L.setAttribute('data-lf', list.getAttribute('data-lf')); // liste biçimi (core.js doğrular)
     for (const n of [...list.childNodes]) {
       if (n.nodeType === 1 && n.tagName === 'LI') {
         const li = document.createElement('li');
@@ -1588,6 +1910,7 @@
         const type = n.dataset.wordList || 'ul';
         const level = SS.clamp(+n.dataset.wordLevel || 1, 1, 9);
         const start = +n.dataset.wordStart || 0;
+        const wf = app.parseLF(n.dataset.wordFmt)[0];
         const tmp = document.createElement(type);
         tmp.appendChild(n);
         const li = fixList(tmp).firstElementChild;
@@ -1599,7 +1922,7 @@
         let st = run && out.lastElementChild === run.root ? run.stack : null;
         if (!st) {
           const first = newList(out);
-          run = { root: first, stack: (st = [first]) };
+          run = { root: first, stack: (st = [first]), levels: [] };
         }
         while (st.length > level) st.pop();
         while (st.length < level) {
@@ -1611,9 +1934,19 @@
           // aynı düzeyde tür değişti (ör. madde → numara): yeni liste
           L = newList(L.parentElement);
           st[st.length - 1] = L;
-          if (st.length === 1) run.root = L;
+          if (st.length === 1) [run.root, run.levels] = [L, []];
         }
         L.appendChild(li);
+        // Word'deki biçim (a), I., 1.1., –…) listenin data-lf'sine (core.js); varsayılan düzey (1. a. i. / • o ▪) yazılmaz
+        if (wf && !run.levels[level - 1]) {
+          run.levels[level - 1] = wf;
+          const v = app.formatLF(run.levels.map((f, k) => {
+            const D = f && app.defaultLevel(k, f.fmt !== 'bullet');
+            return f && !(f.fmt === D.fmt && f.text === D.text) ? f : null;
+          }));
+          if (v) run.root.setAttribute('data-lf', v);
+          else run.root.removeAttribute('data-lf');
+        }
       } else {
         // P/H: içinde blok varsa parçalara böl
         let part = null;
@@ -1768,6 +2101,7 @@
       if (/^H[1-3]$/.test(tag) && n.getAttribute('data-num') === '0') el.setAttribute('data-num', '0'); // numarasız başlık
       if (tag === 'SPAN' && n.classList.contains('tab')) el.className = 'tab';
       if (tag === 'OL' && +n.getAttribute('start') > 1) el.setAttribute('start', n.getAttribute('start'));
+      if (/^(OL|UL)$/.test(tag) && n.getAttribute('data-lf')) el.setAttribute('data-lf', n.getAttribute('data-lf')); // liste biçimi
       if (tag === 'A' && app.safeHref && app.safeHref(n.getAttribute('href'))) el.setAttribute('href', app.safeHref(n.getAttribute('href')));
       cleanInternal(n, el);
     }

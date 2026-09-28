@@ -79,14 +79,22 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
   - The toolbar box `#headingNum` applies the `app.HEADING_NUMS` presets and toggles `data-num`.
 - **Tab stops.** A block's custom stops are `data-tabs`: `l|c|r|d` + position in px from the text area's left edge + optional leader `.`/`-`/`_`, e.g. `l75.6 r604.73.` (`app.parseTabs`/`app.formatTabs`).
   - In such blocks every tab character is its own `span.tab` with `tab-size: 0` (`normalizeBlocks` → `wrapTabs`, which also unwraps spans that got typed text and keeps the caret).
-  - `fitTabs()` runs in every `layout()`, cached per block signature. The signature includes the image side bands beside the block (`sideBands` from `renderExclusions`), because a wrapping image shifts where lines start. It resets all of a block's tabs to 0, then gives each tab `padding-left` up to its stop, left to right: left, right/center (the following segment up to the next tab, minus 0.2 px so rounding can't break the line), decimal (up to `,`/`.`). Past the last stop the default 1.27 cm stops apply, and a hanging indent acts as a stop. No default stop beyond the right margin: the tab gets 0 and the text after it wraps.
+  - `fitTabs()` runs in every `layout()`, cached per block signature. The signature includes the image side bands beside the block (`sideBands` from `renderExclusions`), because a wrapping image shifts where lines start. It resets all of a block's tabs to 0, then gives each tab `padding-left` up to its stop, left to right: left, right/center (the following segment up to the next tab, minus 0.2 px so rounding can't break the line), decimal (up to the first `,`, Turkish decimal separator; without a comma the number ends at the stop, `.` being a thousands separator; without a number like a right tab). Past the last stop the default 1.27 cm stops apply, and a hanging indent acts as a stop. No default stop beyond the right margin: the tab gets 0 and the text after it wraps.
   - Leaders are CSS backgrounds (`.lead-*`). `serialize()` strips the paddings. Blocks without `data-tabs` keep CSS `tab-size: 1.27cm`.
   - Ruler: the type box `#rulerTabType` picks the stop type; a click adds a stop, dragging moves it, dragging it off the ruler removes it, and a double-click opens `app.tabsDialog()`, which is also "Sekmeler…" in the Paragraph dialog.
-- **Captions:** `img.caption = {text, label, pos}`.
+- **List formats** (Word's numbering/bullet library and multilevel lists): a list's `data-lf` is `level1;level2;…`, each level `fmt|text`.
+  - `fmt` is Word's `numFmt` (the `app.NUM_FMTS` keys) or `bullet`. `text` is Word's `lvlText`, with `%1` = the list's own items and `%2` = one list deeper; for a bullet, the character itself.
+  - Level 1 applies to the list's own items; level k applies to lists k−1 deep that have no `data-lf` of their own, when the type fits (numbered → `ol`, bullet → `ul`). Missing levels use the defaults in `css/app.css` (1. a. i. / • o ▪).
+  - `listFmtCSS` generates the `::marker` rules into `<style id="listStyles">`: `counter(list-item, …)`, or `counters(list-item, ".")` for `%1.%2.`. `normalizeBlocks` → `applyListStyles` validates the attribute (`app.parseLF`/`formatLF`) and adds rules for new values.
+  - Adjacent lists are separate numbering units. Import and the app's own splits put `margin-bottom: 0` / `margin-top: 0` inline between lists that were one block in Word (same style with `contextualSpacing`) or in the editor.
+  - UI: the `#listFmt` box (`app.setListFormat`: writes the level on the owner list = nearest ancestor with `data-lf`, else the top list; retags `ol`↔`ul`; a list Chrome merged into an adjacent list of another format is split off). "Numaralandırma değerini ayarla" (`#numValueDialog`) sets `ol[start]`, splitting the list at a middle item.
+  - Chrome doesn't renumber the following items after `indent`/`outdent` or list commands in the `ol > ol` form ("1. 2. a. 4."); `refreshLists()` toggles `display` on the affected top-level lists.
+- **Captions:** `img.caption = {text, label, pos, chapter?}`.
   - Rendered as `.cap` next to the image, below or above the rotated image's bounding box. The caption itself is never rotated.
   - Its height is measured from the DOM.
   - `app.objBox(img)` is the image plus its caption. Bands, snapping, alignment and page clamping all use it.
-  - Numbers are never stored. `app.captionNumbers()` computes them per label from page, then y, then x order.
+  - Numbers are never stored. `app.captionNumbers()` computes them per label from page, then y, then x order, and returns `id → {n, ch, sep, text}`.
+  - `caption.chapter` (a separator `.` `-` `–` `—` `:`) is Word's "include chapter number": the number is the last Heading 1 above the image (`chapterMarks`: its page and y compared with the image's; the heading numbering counter and format, or the heading order when headings aren't numbered), the separator, and the sequence, which restarts at each Heading 1. `refreshChapterCaptions()` renumbers after every `layout()`. The context bar's `#capNum` sets it for all captions of the label.
 - **Layers inside `#doc`:** pages → `#behindLayer` → `#flow` → `#frontLayer` → `#overlay`.
   - Each page has a `.pclip` in both image layers, which clips images to the page.
   - Zoom is a CSS transform on `#doc`. Convert pointer and rect coordinates with `app.toDoc(e)` or `app.clientToFlow()`, which divide by `state.zoom`.
@@ -120,7 +128,8 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 - Paste goes through `app.sanitizeHTML()`. It reduces Word and web HTML to `p/h1-3/ul/ol/li/b/i/u/s/sub/sup/span/a[href]/br` and `.pb`, turns Word's fake list paragraphs (with their `mso-list` levels) into nested lists, and keeps Word's pt/cm paragraph indents and spacing and `line-height: %`.
   - Word's `tab-stops:` become `data-tabs`, and `mso-tab-count` spans become tab characters.
   - The fake numbers of Word's numbered headings (`mso-list:Ignore`) are dropped.
-- Keep editor HTML within that vocabulary, plus `ol[start]`, `[data-tabs]`, `span.tab` and `h1–h3[data-num="0"]`; the internal clipboard keeps those. Export and import only understand it.
+- Keep editor HTML within that vocabulary, plus `ol[start]`, `ol/ul[data-lf]`, `[data-tabs]`, `span.tab` and `h1–h3[data-num="0"]`; the internal clipboard keeps those. Export and import only understand it. Word's pasted lists get `data-lf` from the fake marker (`wordListFormat`: "a)", "IV.", "(1)", "1.1.", Symbol/Wingdings bullets).
+- **Symbols:** the Ω button opens `#symbolPanel` (recent symbols in localStorage, grouped symbols, a hex code field); `app.insertSymbol(c)` inserts with `insertText`. Alt+X converts the hex code before the caret (after `U+`, a valid 5–6 digit non-BMP code, else the last 4 digits) to the character, or the character to its code.
 - **Links** are `<a href>` with `http:`, `https:` or `mailto:` only (`app.safeHref`; anything else stays plain text on paste, `.sayfa` load and import). Ctrl+K / the toolbar button open `app.linkDialog()` (add, edit, remove; `www.…` → `https://`, e-mail → `mailto:`); Ctrl+click opens a link. Export: `w:hyperlink r:id` + external relationship + `Hyperlink` character style (blue/underline come from the style, not direct formatting). Import: `w:hyperlink`, `w:fldSimple` and complex `HYPERLINK` fields; the Hyperlink style's look is not copied onto link runs.
 - **History batching.** The `input` handler commits every edit. `batching` (several commands as one step: the format painter) and `dragMove` (a drag-and-drop move: `deleteByDrag` then `insertFromDrop`, or `dragend` if dropped outside) suppress those commits; the operation commits once at the end.
 - **Format painter** (`app.formatPainter`, `app.copyFormat`/`app.pasteFormat` = Ctrl+Shift+C/V): copies the character format at the selection start and, for a caret/paragraph-mark/multi-paragraph selection, the paragraph style and inline paragraph properties. Applying: paragraph style first, then `removeFormat` + only the character properties that differ, then paragraph properties last (Chrome's `removeFormat` also clears `text-align`).
@@ -150,11 +159,13 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
   - Paragraph starts and `findPageStarts` are measured from the live layout, so **export depends on the current DOM layout** (it calls `app.paginateNow()` first).
   - A page with no text gets a holder paragraph with `pageBreakBefore`, and its images are written with `wrapNone`.
 - Lists use Word's default indents: text at `720·(level+1)` twips, marker 360 twips to its left. A nested list written directly inside a list (Chrome's indent form `<ul><li/><ul>…</ul></ul>`) is exported as the next level.
+  - Lists with a format (`data-lf`, their own or an ancestor's) get their own `abstractNum` (id 3+, shared by equal definitions). The list's levels are shifted to Word levels. Bullets are written with Word's Symbol/Wingdings characters (`BULLET_FONT`). Each list has its own `numId` with a `startOverride` on its level.
+  - Lists without any format are written exactly as before (abstractNum 0/1).
 - **Heading numbering** is written as `abstractNum` 2 (`multilevel`, levels linked with `w:pStyle` to Heading1–3) plus `w:numPr` in those styles.
   - Unnumbered headings and the continuation of a split heading get `w:numId 0`.
   - A numbered heading gets `w:ind` only when it has its own inline indent.
 - `data-tabs` becomes `w:tabs` in `pPr`, after `numPr` and before `spacing` (px × 15 = twips).
-- Captions are `wps` text boxes inside `mc:AlternateContent`, with the `Caption` style and a `SEQ` field.
+- Captions are `wps` text boxes inside `mc:AlternateContent`, with the `Caption` style and a `SEQ` field; chapter-numbered captions add `STYLEREF 1 \s` + the separator and `SEQ … \s 1`.
 - Page breaks become `pageBreakBefore` on the next paragraph.
 - Run and paragraph formatting is read from computed styles, but only what differs from the paragraph's style (`styleOf`: Normal or Heading 1–3) is written as direct formatting. styles.xml is generated from `state.styles` (Normal in docDefaults + Normal style, headings basedOn Normal), so changing a style in Word changes the text.
 - Keep OOXML child-element order in `pPr`, `rPr` and `wp:anchor`. Word rejects files with the wrong order.
@@ -170,9 +181,12 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 - **HTML with placeholders:** drawings become `<span class="ph">` placeholders in the generated HTML.
 - **Styles:** Word's Normal (docDefaults + default paragraph style) and "heading 1–3" styles become `state.styles` (`importStyles`; a missing heading style keeps the built-in one). `TAG` (the defaults paragraphs and runs are compared with) is derived from them per import.
 - **Paragraph formatting:** where a paragraph's own Word style differs from those, its font and size go on the block element itself; runs only get spans where they differ (font, size, colour, bold and italic are compared with the paragraph's style). `auto` line spacing becomes a multiple × `SS.lineFactor` (unspecified = single). List level = rank of the effective left indent within a run of list paragraphs (so Word's single-level "List Bullet 2" becomes level 2); an ordered list that resumes after other paragraphs gets `ol[start]`.
+  - A new top-level list starts when the Word list definition (abstractNum) changes or the numbering restarts, so separate Word lists stay separate.
+  - Each level's `numFmt`/`lvlText` (Symbol/Wingdings bullets mapped to Unicode by `bulletChar`) becomes the owner list's `data-lf`, with placeholders shifted to the editor level; default levels are left out.
 - **Placement:** after `app.load()`, `placeAll()` goes through the placeholders in document order. For each one it finishes pagination up to the placeholder's page, measures the placeholder, creates the image object, and re-runs layout before the next.
   - Inline images become `topbottom` at their line.
   - Anchored images follow Word's positioning rules.
+- **Caption numbers:** a two-part number ("Şekil 2.1", `.` `-` `–` `—`, from fields or typed) makes the caption chapter-numbered. After placement the editor's numbers are compared with the document's; multi-part numbers that differ are counted in the import summary (`capRenum`). Plain numbers aren't checked, because Word's cached SEQ results are often stale.
 - **Caption attachment** looks for:
   - A paragraph right after (or right before) an image-only paragraph that matches `CAPTION_RE` or uses the `caption` style.
   - A caption-like text box in the same drawing or group.

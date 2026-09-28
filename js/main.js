@@ -38,6 +38,7 @@
     captionPos: () => app.toggleCaptionPos(),
     pageBreak: () => app.insertPageBreak(),
     find: () => app.openFind(true),
+    symbol: () => app.symbolPanel(),
     paragraph: () => app.paragraphDialog(),
     link: () => app.linkDialog(),
     formatPainter: () => app.formatPainter(),

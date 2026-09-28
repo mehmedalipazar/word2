@@ -828,8 +828,19 @@
 
   // ---------- Şekil yazısı ----------
   const capLabelSel = document.getElementById('capLabel');
+  const capNumSel = document.getElementById('capNum');
   let defaultLabel = 'Şekil';
-  const newCaption = () => ({ text: '', label: defaultLabel, pos: 'below' });
+  // Etiketin numaralandırması (bölüm numarası) o etiketteki öteki yazılardan gelir (core.js: caption.chapter)
+  const labelChapter = (label, except) => {
+    const o = state.images.find((i) => i !== except && i.caption && (i.caption.label || 'Şekil') === label);
+    return o ? o.caption.chapter || null : null;
+  };
+  const newCaption = () => {
+    const c = { text: '', label: defaultLabel, pos: 'below' };
+    const ch = labelChapter(defaultLabel);
+    if (ch) c.chapter = ch;
+    return c;
+  };
 
   // Yazıyı sayfa üzerinde düzenle (Enter: bitir, Esc: vazgeç, başka yere tıklamak: bitir)
   app.editCaption = function (id) {
@@ -908,7 +919,29 @@
     defaultLabel = capLabelSel.value;
     const imgs = selImages().filter((i) => i.caption);
     if (!imgs.length) return;
-    imgs.forEach((i) => (i.caption.label = defaultLabel));
+    imgs.forEach((i) => {
+      const had = state.images.some((o) => o !== i && o.caption && (o.caption.label || 'Şekil') === defaultLabel);
+      i.caption.label = defaultLabel;
+      if (!had) return;
+      const ch = labelChapter(defaultLabel, i); // yeni etiketin numaralandırması
+      if (ch) i.caption.chapter = ch;
+      else delete i.caption.chapter;
+    });
+    finishEdit();
+  });
+  // Numaralandırma: seçili yazının etiketindeki bütün yazılara (Word'deki gibi etiket başına)
+  capNumSel.addEventListener('change', () => {
+    const caps = selImages().filter((i) => i.caption);
+    if (!caps.length) return;
+    const sep = capNumSel.value;
+    const labels = new Set(caps.map((i) => i.caption.label || 'Şekil'));
+    state.images.forEach((i) => {
+      if (!i.caption || !labels.has(i.caption.label || 'Şekil')) return;
+      if (sep) i.caption.chapter = sep;
+      else delete i.caption.chapter;
+    });
+    if (sep && !(state.styles.num && state.styles.num[0]))
+      SS.toast("Başlık 1'ler numaralı değil: bölüm numarası başlıkların sırasından alınır. Başlık numaralandırması için liste düğmelerinin yanındaki kutuyu kullanın.", 5000);
     finishEdit();
   });
 
@@ -921,7 +954,7 @@
   });
 
   // ---------- Bağlam çubuğu ----------
-  const numInputs = [...document.querySelectorAll('[data-num]')];
+  const numInputs = [...document.querySelectorAll('input[data-num]')]; // (editördeki başlıkların data-num'u değil)
   const keepRatio = document.getElementById('keepRatio');
   app.updateCtxBar = function () {
     const imgs = selImages();
@@ -943,7 +976,11 @@
       const l = caps[0].caption.label || 'Şekil';
       if (![...capLabelSel.options].some((o) => o.value === l)) capLabelSel.add(new Option(l, l));
       capLabelSel.value = l;
+      const ch = caps[0].caption.chapter || '';
+      if (![...capNumSel.options].some((o) => o.value === ch)) capNumSel.add(new Option(`Bölüme göre: 2${ch}1`, ch));
+      capNumSel.value = ch;
     }
+    capNumSel.disabled = !caps.length;
     const one = imgs.length === 1 ? imgs[0] : null;
     for (const inp of numInputs) {
       inp.disabled = !one;
