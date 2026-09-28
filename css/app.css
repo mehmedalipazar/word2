@@ -226,8 +226,10 @@ select {
    düzey 1,27 cm içeride. Word'den gelen ya da cetvelle / Paragraf penceresiyle verilen değer listenin (bütün düzey)
    ya da maddenin satır içi stilindedir (core.js: setListIndent). İç listeler de kenardan başlar (maddenin içindeki
    liste maddenin girintisini geri alır): değerler iç içe toplanmaz. İşaret içeride (inside) kalır: dışarıdaki işareti
-   şerit float'larının margin alanı kaybettiriyor. İşaretin sonundaki sekme metni girinti durağına hizalar; işaret
-   asılı girintiden uzunsa sonraki 1,27 cm durağına (tab-size). */
+   şerit float'larının margin alanı kaybettiriyor. İşaretin sonundaki sekme metni Word'deki gibi asılı girintiye
+   (metnin yerine) hizalar; işaret asılı girintiden uzunsa sonraki durağa. Duraklar maddenin metninin yerinden
+   1,27 cm arayla sayılır; asılı girinti 1,27 cm'den büyükse arası asılı girinti kadar olur (tab-size): yoksa işaretle
+   metin arasına bir durak düşer ve ilk satır oradan başlar. */
 .editor ul, .editor ol { margin: 0 0 8pt; padding-left: 0; --li-pad: 1.27cm; --li-ti: -0.6351cm; }
 .editor :is(ul, ol) :is(ul, ol) { --li-pad: 2.54cm; }
 .editor :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 3.81cm; }
@@ -238,7 +240,10 @@ select {
 .editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 10.16cm; }
 .editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 11.43cm; }
 /* 0,6351 cm: Chrome bu kalıtılan girintiyi listeden taşınan metne kopyalar; core.js: normalizeBlocks bu değerden tanıyıp siler */
-.editor li { list-style-position: inside; margin: 0; padding-left: var(--li-pad); text-indent: var(--li-ti); --li-in: var(--li-pad); }
+.editor li {
+  list-style-position: inside; margin: 0; padding-left: var(--li-pad); text-indent: var(--li-ti); --li-in: var(--li-pad);
+  tab-size: max(1.27cm, calc(0px - var(--li-ti)));
+}
 .editor li > ul, .editor li > ol { margin: 0 0 0 calc(0px - var(--li-in)); }
 .editor ul > ul, .editor ul > ol, .editor ol > ul, .editor ol > ol { margin: 0; } /* Chrome'un girinti biçimi */
 .editor ul > li::marker { content: "\2022\9"; }
