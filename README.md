@@ -8,9 +8,12 @@ Resimleri sürükle-bırakla **istediğiniz yere koyabildiğiniz** ve metin değ
 
 ## Web'de yayın
 
-Uygulama Cloudflare Pages'te yayınlanır; `main` dalına her gönderimde (git push) kendiliğinden güncellenir.
-Yayına yalnızca uygulama dosyaları girer (`build.sh`: `index.html`, `css/`, `js/`, `_headers`).
-Belgeler hiçbir sunucuya gitmez; her kullanıcının kendi tarayıcısında kalır.
+Adres: **https://mehmedalipazar.github.io/word2/**
+
+Uygulama GitHub Pages'te yayınlanır; `main` dalına her gönderimde (git push) kendiliğinden güncellenir
+(`.github/workflows/pages.yml`). GitHub Pages dosyaları 10 dakika önbellekte tuttuğu için güncelleme
+tarayıcılarda en geç birkaç dakika içinde görünür. Yayına yalnızca uygulama dosyaları girer
+(`build.sh`: `index.html`, `css/`, `js/`). Belgeler hiçbir sunucuya gitmez; her kullanıcının kendi tarayıcısında kalır.
 
 ## Neden Word'deki gibi kaymıyor?
 

@@ -29,10 +29,10 @@ The project has no build step, no dependencies and no `package.json`. The target
 
 ## Deployment
 
-- The site runs on Cloudflare Pages, connected to the GitHub repo. Every push to `main` is deployed.
-- Pages settings: framework preset None, build command `sh build.sh`, build output directory `dist`.
-- `build.sh` copies only the app into `dist/`: `index.html`, `css/`, `js/` and `_headers`. README.md, CLAUDE.md and the git files are not published. A new top-level file or folder the app needs must be added to `build.sh` too.
-- `_headers` sets response headers: `nosniff`, no framing, referrer policy.
+- The site runs on GitHub Pages at https://mehmedalipazar.github.io/word2/ (public repo). Every push to `main` is deployed by `.github/workflows/pages.yml`; the repo's Pages source must be "GitHub Actions".
+- The workflow runs `build.sh`, which copies only the app into `dist/`: `index.html`, `css/` and `js/`. README.md, CLAUDE.md and the git files are not published. A new top-level file or folder the app needs must be added to `build.sh` too.
+- The site lives under `/word2/`, so every path the app loads must stay relative.
+- GitHub Pages can't set custom response headers, and it caches files for 10 minutes.
 - The app itself still has no build step. Keep `index.html` working over `file://`.
 
 ## Architecture
