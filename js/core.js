@@ -380,17 +380,20 @@
   function drawBands(bands) {
     const { cw } = app.geom();
     const frag = document.createDocumentFragment();
+    // Şeritlerin kenarları tarayıcının düzen birimine (1/64 px) oturtulur: margin-top ve yükseklik tam birim olur. Yoksa
+    // her birinin yuvarlaması zincir boyunca birikiyor (baskıda sayfa başına 1/32 px; 17. sayfada satırlar 1 px kayıyordu).
+    const q = (v) => Math.round(v * 64) / 64;
     let prev = 0;
     lastBands = bands;
     sideBands = bands.filter((bd) => bd.xL < cw);
     for (const bd of bands) {
-      const mt = bd.a - prev;
-      const h = bd.b - bd.a;
+      const mt = q(bd.a) - prev;
+      const h = q(bd.b) - q(bd.a);
       const hasLeft = bd.xL > 0;
       // Not: float kaptan geniş olmamalı; Chrome o zaman margin-top alanını da metne kapatıyor.
       if (hasLeft) frag.appendChild(mkFloat('left', 'both', bd.xL, h, mt));
       if (bd.xR < cw) frag.appendChild(mkFloat('right', hasLeft ? 'right' : 'both', cw - bd.xR, h, mt));
-      prev = bd.b;
+      prev = q(bd.b);
     }
     els.flow.querySelectorAll(':scope > .ex').forEach((el) => el.remove());
     els.flow.insertBefore(frag, els.editor);

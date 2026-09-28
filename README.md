@@ -113,7 +113,8 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   paragrafa konur, böylece Word'de de aynı sayfada ve yerde durur. Şekil yazıları Word'ün "Resim Yazısı" stiliyle ve
   otomatik numara alanıyla yazılır (Word'de "Şekiller Tablosu" eklenebilir). Satır aralığı Word'ün satır birimiyle,
   dul/öksüz satır denetimi ve başlıklarda "sonrakiyle birlikte tut" açık yazılır.
-- **PDF / Yazdır**: ekrandaki sayfaların birebir aynısı ("PDF olarak kaydet" seçin)
+- **PDF / Yazdır**: ekrandaki sayfaların birebir aynısı ("PDF olarak kaydet" seçin); uzun belgede de her sayfa kenar
+  boşluklarına uyar ve belge sonuna kadar basılır
 
 ## Kısayollar
 

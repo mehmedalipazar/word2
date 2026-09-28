@@ -404,7 +404,10 @@ body.dragging, body.dragging * { user-select: none !important; }
   .chrome, .toast, .dialog, .overlay { display: none !important; }
   .workspace { overflow: visible; }
   .scaler { margin: 0 !important; }
-  .doc { transform: none !important; overflow: clip; }
+  .doc { transform: none !important; }
+  /* Belge yüksekliği sayfa sayısına sabit: baskının sayfa bölmesi düzenden ayrılıp metin son sayfadan taşarsa kesilmesin,
+     fazladan sayfaya basılsın (main.js: printPitch) */
+  .doc, .flow { overflow-x: clip; overflow-y: visible; }
   .editor.empty > :first-child::before { content: none; }
   .editor .pb::before, .editor .pb::after, .cap-text:empty::before { content: none; }
   .cap-text[contenteditable] { background: none; }

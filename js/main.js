@@ -215,9 +215,13 @@
     else app.commit('edit');
   }
 
+  // @page boyu cm olarak (3 basamak). Chrome basarken sayfaları, bu boyun 1/64 px'e yuvarlanıp tam piksele yukarı
+  // yuvarlanmış aralığıyla böler (A4: 29,7 cm = 1122,52 px, sayfalar 1123 px'te bir; Letter 1056 px'te bir).
+  const pageCm = (px) => SS.round(U.pxToCm(px), 3);
+  const printPitch = (px) => Math.ceil(Math.round(U.cmToPx(pageCm(px)) * 64) / 64);
   function updatePageStyle() {
     const g = app.geom();
-    const css = `@page { size: ${SS.round(U.pxToCm(g.PW), 3)}cm ${SS.round(U.pxToCm(g.PH), 3)}cm; margin: 0; }`;
+    const css = `@page { size: ${pageCm(g.PW)}cm ${pageCm(g.PH)}cm; margin: 0; }`;
     if ($('pageStyle').textContent !== css) $('pageStyle').textContent = css;
   }
 
@@ -316,7 +320,11 @@
   });
 
   // ---------- Yazdırma / PDF ----------
-  // Yazdırırken sayfa arası boşluk 0 yapılır; metin sayfa sınırlarına göre aynen yeniden dizilir.
+  // Yazdırırken sayfalar Chrome'un baskıdaki sayfa aralığıyla dizilir (printPitch; sayfa arası boşluk yalnızca kağıt
+  // boyunun tam piksele tamamlanan kısmı, o da sayfanın altında basılmayan yerde); metin sayfa sınırlarına göre aynen
+  // yeniden dizilir. Aralık kağıt boyu olunca her sayfada ~0,5 px kayma birikiyordu: sayfa başları yukarı kayıyor,
+  // sayfa sınırını aşan itmeler (core.js: pushHanging) gerçek sınırın önünde kalıp metni aşağı itiyor, uzun belgenin
+  // sonu son sayfadan taşıp basılmıyordu.
   let printing = false;
   let savedZoom = 1;
   let savedGap = 24;
@@ -327,7 +335,8 @@
     savedZoom = state.zoom;
     savedGap = state.gap;
     state.zoom = 1;
-    state.gap = 0;
+    const { PH } = app.geom();
+    state.gap = printPitch(PH) - PH;
     app.printMode = true;
     app.clearSelection();
     app.relayoutAll();
