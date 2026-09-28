@@ -313,7 +313,16 @@
   function placeImageEl(el, img) {
     el.style.cssText = `left:${img.x}px;top:${img.y}px;width:${img.w}px;height:${img.h}px;transform:rotate(${img.rot || 0}deg)`;
     el.classList.toggle('locked', !!img.locked);
+    el.classList.toggle('cropped', !!img.crop);
+    el.firstChild.style.cssText = img.crop ? app.cropStyle(img.crop) : '';
   }
+  // Kırpılmış resim (img.crop = [sol, üst, sağ, alt], 0–1): tam resim çerçeveden taşar, çerçeve keser (objects.js: Kırpma)
+  app.cropStyle = function ([l, t, r, b]) {
+    const fw = 1 - l - r;
+    const fh = 1 - t - b;
+    const pc = (v) => SS.round(v * 100, 4) + '%';
+    return `position:absolute;left:${pc(-l / fw)};top:${pc(-t / fh)};width:${pc(1 / fw)};height:${pc(1 / fh)}`;
+  };
 
   // Şekil yazısı elemanı: resmin sayfa kırpma kutusunda, resmin hemen üstündeki katmanda
   function placeCaption(img, clip, nums) {
@@ -696,6 +705,8 @@
     const pin = (n, o) => (n.nodeType === 3 ? { n, o } : n.childNodes[o] ? { before: n.childNodes[o] } : { after: n.lastChild || n });
     return [pin(r.startContainer, r.startOffset), pin(r.endContainer, r.endOffset)];
   }
+  app.pinSelection = () => pinSelection();
+  app.unpinSelection = (pins) => unpinSelection(pins);
   function unpinSelection(pins) {
     if (!pins) return;
     const r = document.createRange();
@@ -771,6 +782,43 @@
       e.style.textIndent = '';
       if (!e.getAttribute('style')) e.removeAttribute('style');
     });
+    // Seçim boşken simge komutu verilip yazılınca Chrome <span style="vertical-align: super|sub"> üretir:
+    // gerçek <sup>/<sub> olsun (küçük boyut, Word'e vertAlign). Simge kapatılınca içeride kalan
+    // "baseline" parçası simgenin dışına alınır.
+    const vas = ed.querySelectorAll('span[style*="vertical-align"]');
+    if (vas.length) {
+      const pins = pinSelection();
+      vas.forEach((s) => {
+        const v = s.style.verticalAlign;
+        s.style.verticalAlign = '';
+        const rest = (s.getAttribute('style') || '').trim();
+        if (v === 'super' || v === 'sub') {
+          const el = document.createElement(v === 'super' ? 'sup' : 'sub');
+          s.replaceWith(el);
+          if (rest) el.appendChild(s);
+          else while (s.firstChild) el.appendChild(s.firstChild);
+        } else {
+          const outer = s.parentElement.closest('sup, sub');
+          if (outer && ed.contains(outer)) {
+            // <sup>ön<span baseline>metin</span>arka</sup> → <sup>ön</sup>metin<sup>arka</sup>
+            const tail = document.createRange();
+            tail.setStartAfter(s);
+            tail.setEndAfter(outer.lastChild);
+            const after = outer.cloneNode(false);
+            after.appendChild(tail.extractContents());
+            outer.after(after);
+            if (!after.textContent) after.remove();
+            outer.after(s);
+            if (!outer.textContent) outer.remove();
+          }
+          if (!rest) {
+            while (s.firstChild) s.before(s.firstChild);
+            s.remove();
+          }
+        }
+      });
+      unpinSelection(pins);
+    }
     // Word'den gelen üst/alt simgede boyut <sup> içindeki span'daydı ve küçültmeyi eziyordu: boyutu dışarı al
     ed.querySelectorAll('sup > span[style*="font-size"]:only-child, sub > span[style*="font-size"]:only-child').forEach((s) => {
       const v = s.parentNode;
@@ -960,7 +1008,11 @@
   };
 
   app.load = function (data) {
-    if (!data || data.app !== 'SerbestSayfa') throw new Error('Bu dosya bir SerbestSayfa belgesi değil.');
+    // Yapı, var olan belgeye dokunmadan önce denetlenir: bozuk dosya yarım yüklenip açık belgeyi bozmasın
+    const obj = (v) => v == null || (typeof v === 'object' && !Array.isArray(v));
+    const ok = data && data.app === 'SerbestSayfa' && (data.html == null || typeof data.html === 'string') &&
+      (data.images == null || Array.isArray(data.images)) && obj(data.assets) && obj(data.page) && obj(data.hf);
+    if (!ok) throw new Error('Bu dosya bir SerbestSayfa belgesi değil ya da bozuk.');
     state.page = data.page || defaultPage();
     // Eski dosyalardaki "Sayfa numarası (alt orta)" seçeneği alt bilginin orta yuvasına çevrilir
     const hf = data.hf || emptyHF();

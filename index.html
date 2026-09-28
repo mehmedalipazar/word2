@@ -35,16 +35,19 @@
       <option value="h2">Başlık 2</option>
       <option value="h3">Başlık 3</option>
     </select>
-    <select id="fontFamily" title="Yazı tipi">
-      <option>Calibri</option><option>Arial</option><option>Times New Roman</option>
-      <option>Cambria</option><option>Georgia</option><option>Segoe UI</option>
-      <option>Tahoma</option><option>Verdana</option><option>Courier New</option>
-    </select>
-    <select id="fontSize" title="Yazı boyutu, nk (Ctrl+Shift+&gt; / &lt;: büyüt/küçült; Ctrl+] / [: 1 nk)">
-      <option>8</option><option>9</option><option>10</option><option>10.5</option><option selected>11</option>
-      <option>12</option><option>14</option><option>16</option><option>18</option><option>20</option>
-      <option>24</option><option>28</option><option>32</option><option>36</option><option>48</option><option>72</option>
-    </select>
+    <!-- Yazılabilir kutular: liste oktan açılır, değer yazılıp Enter ile uygulanır (text.js: combo); yazı tipleri text.js'te -->
+    <span class="combo" title="Yazı tipi: listeden seçin ya da adını yazıp Enter'a basın">
+      <select id="fontFamily" tabindex="-1" aria-label="Yazı tipi listesi"></select>
+      <input id="fontFamilyText" aria-label="Yazı tipi" autocomplete="off" spellcheck="false">
+    </span>
+    <span class="combo" title="Yazı boyutu, nk: listeden seçin ya da yazıp (ör. 11,5) Enter'a basın (Ctrl+Shift+&gt; / &lt;: büyüt/küçült; Ctrl+] / [: 1 nk)">
+      <select id="fontSize" tabindex="-1" aria-label="Yazı boyutu listesi">
+        <option>8</option><option>9</option><option>10</option><option value="10.5">10,5</option><option selected>11</option>
+        <option>12</option><option>14</option><option>16</option><option>18</option><option>20</option>
+        <option>24</option><option>28</option><option>32</option><option>36</option><option>48</option><option>72</option>
+      </select>
+      <input id="fontSizeText" inputmode="decimal" aria-label="Yazı boyutu" autocomplete="off" spellcheck="false">
+    </span>
   </div>
   <div class="group">
     <button class="tb" data-cmd="bold" data-icon="bold" title="Kalın (Ctrl+B)"></button>
@@ -55,6 +58,7 @@
     <button class="tb" data-cmd="superscript" data-icon="superscript" title="Üst simge (Ctrl+Shift+=)"></button>
     <label class="tb color-tb" title="Yazı rengi"><span class="letter">A</span><span class="bar" id="foreBar"></span><input type="color" id="foreColor" value="#c00000"></label>
     <label class="tb color-tb" title="Vurgu rengi"><span data-icon="highlight"></span><span class="bar" id="backBar"></span><input type="color" id="backColor" value="#ffff00"></label>
+    <button class="tb" data-cmd="link" data-icon="link" title="Köprü ekle / düzenle (Ctrl+K); Ctrl+tık: bağlantıyı aç"></button>
     <button class="tb" data-cmd="removeFormat" data-icon="eraser" title="Biçimi temizle (Ctrl+Boşluk)"></button>
   </div>
   <div class="group">
@@ -83,7 +87,8 @@
     <button class="tb" data-cmd="pageBreak" data-icon="pageBreak" title="Sayfa sonu (Ctrl+Enter)"></button>
     <button class="tb" data-cmd="addPage" data-icon="filePlus" title="Sona boş sayfa ekle"></button>
     <button class="tb" data-cmd="removePage" data-icon="fileMinus" title="Sondaki boş sayfayı kaldır"></button>
-    <button class="tb" data-cmd="pageSetup" data-icon="pageSetup" title="Sayfa yapısı"></button>
+    <button class="tb" data-cmd="headerFooter" data-icon="headerFooter" title="Üst bilgi, alt bilgi ve sayfa numarası (ya da sayfanın üst/alt boşluğuna çift tıklayın)"></button>
+    <button class="tb" data-cmd="pageSetup" data-icon="pageSetup" title="Sayfa yapısı: kağıt, yön, kenar boşlukları, üst/alt bilgi ve sayfa numarası"></button>
   </div>
   <div class="group">
     <button class="tb" data-cmd="find" data-icon="search" title="Bul ve Değiştir (Ctrl+F / Ctrl+H)"></button>
@@ -118,6 +123,10 @@
       <option>Şekil</option><option>Harita</option><option>Fotoğraf</option><option>Grafik</option><option>Resim</option><option>Tablo</option>
     </select>
     <button class="tb" data-cmd="captionPos" data-icon="capPos" title="Yazıyı resmin üstüne/altına al"></button>
+  </div>
+  <div class="group">
+    <button class="tb" data-cmd="crop" data-icon="crop" title="Kırp: siyah tutamakları sürükleyin; resmi çerçevenin içinde kaydırmak için resmi sürükleyin (Esc ya da Enter: bitir)">Kırp</button>
+    <button class="tb" data-cmd="resetCrop" data-icon="cropReset" title="Kırpmayı sıfırla (resmin tamamı)"></button>
   </div>
   <div class="group">
     <button class="tb" data-cmd="fitWidth" data-icon="fitWidth" title="Kenar boşlukları arasına sığdır"></button>
@@ -209,10 +218,10 @@
     </div>
     <fieldset>
       <legend>Kenar boşlukları (cm)</legend>
-      <label>Üst<input name="mt" type="number" step="0.1" min="0"></label>
-      <label>Alt<input name="mb" type="number" step="0.1" min="0"></label>
-      <label>Sol<input name="ml" type="number" step="0.1" min="0"></label>
-      <label>Sağ<input name="mr" type="number" step="0.1" min="0"></label>
+      <label>Üst<input name="mt" inputmode="decimal" autocomplete="off"></label>
+      <label>Alt<input name="mb" inputmode="decimal" autocomplete="off"></label>
+      <label>Sol<input name="ml" inputmode="decimal" autocomplete="off"></label>
+      <label>Sağ<input name="mr" inputmode="decimal" autocomplete="off"></label>
     </fieldset>
     <fieldset class="hf-set">
       <legend>Üst ve alt bilgi</legend>
@@ -235,7 +244,7 @@
       <p class="hint-text wide">Yuvalara metin yazın; {sayfa} sayfa numarası, {toplam} sayfa sayısı olur.</p>
     </fieldset>
     <div class="actions">
-      <button value="cancel" class="btn">Vazgeç</button>
+      <button type="button" value="cancel" class="btn">Vazgeç</button>
       <button value="ok" class="btn primary">Uygula</button>
     </div>
   </form>
@@ -260,8 +269,22 @@
     </fieldset>
     <p class="hint-text" id="paraListNote" hidden>Liste maddelerinde girinti liste düzeyine göre belirlenir.</p>
     <div class="actions">
-      <button value="cancel" class="btn" formnovalidate>Vazgeç</button>
+      <button type="button" value="cancel" class="btn">Vazgeç</button>
       <button value="ok" class="btn primary" formnovalidate>Uygula</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="linkDialog" class="dialog">
+  <form method="dialog">
+    <h2>Köprü</h2>
+    <label>Görüntülenecek metin<input name="text" autocomplete="off"></label>
+    <label>Adres<input name="url" placeholder="https://… ya da e-posta adresi" autocomplete="off" spellcheck="false"></label>
+    <div class="actions">
+      <button type="button" value="remove" class="btn" id="linkRemove">Köprüyü kaldır</button>
+      <span class="grow"></span>
+      <button type="button" value="cancel" class="btn">Vazgeç</button>
+      <button value="ok" class="btn primary">Uygula</button>
     </div>
   </form>
 </dialog>

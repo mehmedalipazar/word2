@@ -25,17 +25,21 @@
     addPage,
     removePage,
     pageSetup,
+    headerFooter: () => pageSetup('h0'),
     fitWidth: () => app.fitWidth(),
+    crop: () => app.toggleCrop(),
+    resetCrop: () => app.resetCrop(),
     bringFront: () => app.bringFront(),
     sendBack: () => app.sendBack(),
     toggleLock: () => app.toggleLock(),
     duplicate: () => app.duplicate(),
-    deleteImage: () => app.deleteSelected(),
+    deleteImage: () => app.deleteSelected(true),
     toggleCaption: () => app.toggleCaption(),
     captionPos: () => app.toggleCaptionPos(),
     pageBreak: () => app.insertPageBreak(),
     find: () => app.openFind(true),
     paragraph: () => app.paragraphDialog(),
+    link: () => app.linkDialog(),
     zoomIn: () => zoomStep(1),
     zoomOut: () => zoomStep(-1),
     zoomReset: () => setZoom(1),
@@ -95,7 +99,7 @@
     '<': () => app.growFont(-1),
     ']': () => app.growFont(1, true),
     '[': () => app.growFont(-1, true),
-    k: () => SS.toast('Köprü (bağlantı) eklemek henüz desteklenmiyor.'),
+    k: () => app.linkDialog(),
   };
   const SHIFT_KEYS = { l: () => app.exec('insertUnorderedList'), m: () => app.indent(-1), '=': TEXT_KEYS['='], '+': TEXT_KEYS['+'], '>': TEXT_KEYS['>'], '<': TEXT_KEYS['<'] };
   const IMAGE_ALIGN = { l: 'left', e: 'center', r: 'right' };
@@ -205,15 +209,17 @@
   }
 
   const dlg = $('pageDialog');
-  function pageSetup() {
+  // focus: açılınca imlecin gideceği alan (ör. "h1": üst bilginin orta yuvası)
+  function pageSetup(focus) {
     const f = dlg.querySelector('form');
     const m = state.page.margins;
     f.elements.size.value = state.page.size;
     f.elements.orient.value = state.page.orient;
-    f.elements.mt.value = SS.round(U.pxToCm(m.t), 2);
-    f.elements.mb.value = SS.round(U.pxToCm(m.b), 2);
-    f.elements.ml.value = SS.round(U.pxToCm(m.l), 2);
-    f.elements.mr.value = SS.round(U.pxToCm(m.r), 2);
+    const cmText = (px) => String(SS.round(U.pxToCm(px), 2)).replace('.', ','); // Türkçe ondalık virgül
+    f.elements.mt.value = cmText(m.t);
+    f.elements.mb.value = cmText(m.b);
+    f.elements.ml.value = cmText(m.l);
+    f.elements.mr.value = cmText(m.r);
     for (let i = 0; i < 3; i++) {
       f.elements['h' + i].value = state.hf.header[i];
       f.elements['f' + i].value = state.hf.footer[i];
@@ -222,7 +228,38 @@
     f.elements.pnPreset.value = '';
     dlg.returnValue = '';
     dlg.showModal();
+    const inp = typeof focus === 'string' && f.elements[focus];
+    if (inp) {
+      inp.focus();
+      inp.select();
+    }
   }
+
+  // Word gibi: sayfanın üst/alt kenar boşluğuna çift tıklamak üst/alt bilgiyi (tıklanan yuvayı) düzenlemeye açar
+  function hfSlotAt(e) {
+    if (e.target.closest && e.target.closest('.img-obj, .cap, .sel-box, .handle')) return null;
+    const g = app.geom();
+    const p = app.toDoc(e);
+    const k = app.pageAtY(p.y);
+    const y = p.y - k * g.stride;
+    if (p.x < 0 || p.x > g.PW || y < 0 || y > g.PH) return null;
+    const band = y < g.m.t ? 'h' : y > g.PH - g.m.b ? 'f' : '';
+    return band && band + SS.clamp(Math.floor(((p.x - g.m.l) / g.cw) * 3), 0, 2);
+  }
+  els.doc.addEventListener('mousedown', (e) => e.detail > 1 && hfSlotAt(e) && e.preventDefault(), true); // sözcük seçilmesin
+  els.doc.addEventListener('dblclick', (e) => {
+    const slot = hfSlotAt(e);
+    if (!slot) return;
+    e.preventDefault();
+    pageSetup(slot);
+  });
+  els.doc.addEventListener('mousemove', (e) => {
+    const slot = document.body.classList.contains('dragging') ? null : hfSlotAt(e);
+    const tip = slot ? (slot[0] === 'h' ? 'Üst' : 'Alt') + ' bilgi: düzenlemek için çift tıklayın' : '';
+    if (els.doc.title !== tip) els.doc.title = tip;
+  });
+  // "Vazgeç" gönder düğmesi değil: Enter örtük gönderimde "Uygula"yı seçsin (ilk gönder düğmesi)
+  document.querySelectorAll('dialog button[value="cancel"]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close('cancel')));
   // Hazır sayfa numarası seçeneği ilgili yuvaya yazılır
   dlg.querySelector('[name="pnPreset"]').addEventListener('change', (e) => {
     const [slot, text] = e.target.value.split('|');
@@ -332,9 +369,11 @@
     scheduleAutosave();
   };
   app.onSelectionChange = (imgs) => {
-    $('stHint').textContent = imgs.length
-      ? 'Sürükle: taşı · Köşe: boyut (Shift: serbest) · Üst tutamaç: döndür · Alt: yapışmasız · Oklar: ince ayar'
-      : '';
+    $('stHint').textContent = app.isCropping()
+      ? 'Kırpma: siyah tutamaklar kenarları keser · Resmi sürükle: çerçevede kaydır · Esc/Enter: bitir'
+      : imgs.length
+        ? 'Sürükle: taşı · Köşe: boyut (Shift: serbest) · Üst tutamaç: döndür · Alt: yapışmasız · Oklar: ince ayar'
+        : '';
   };
 
   const title = $('docTitle');
@@ -547,15 +586,22 @@
         fileHandle = null; // kaydederken .sayfa olarak yeni yer sorulsun
         SS.toast(SS.importSummary(rep), 8000);
       } else {
-        app.load(JSON.parse(await SS.readFile(file, 'text')));
+        let data = null;
+        try {
+          data = JSON.parse(await SS.readFile(file, 'text'));
+        } catch (_) { /* JSON değil: app.load Türkçe iletiyle reddeder */ }
+        app.load(data);
         SS.toast('Açıldı: ' + file.name);
       }
       dirty = false;
       autosaveNow();
       return true;
     } catch (err) {
-      console.error(err);
-      SS.toast('Dosya açılamadı: ' + err.message, 7000);
+      // Uygulamanın kendi iletileri (Error) Türkçe; tarayıcının çözümleme/çalışma hataları (TypeError, SyntaxError…)
+      // kullanıcıya İngilizce ham ileti olarak gösterilmez, yalnızca konsola yazılır
+      const own = err && err.constructor === Error;
+      if (!own) console.error(err);
+      SS.toast('Dosya açılamadı: ' + (own ? err.message : 'dosya bozuk ya da desteklenmeyen biçimde.'), 7000);
       return false;
     }
   }

@@ -364,8 +364,7 @@
       applyPPr(s.pPr, pp);
       applyRPr(s.rPr, rb, ctx.theme);
       const m = /^heading ([1-9])$/.exec(s.name);
-      if (m) heading = +m[1];
-      if (s.name === 'title') heading = 1;
+      if (m) heading = +m[1]; // "Title" (Konu Başlığı) başlık düzeyi değildir: biçimiyle Normal paragraf olur
       if (s.name === 'caption') caption = true;
     }
     if (!heading && pp.outline !== undefined && pp.outline < 9) heading = pp.outline + 1;
@@ -447,7 +446,7 @@
       text(s, props) {
         if (!s || props.hidden) return;
         if (props.caps) s = s.toLocaleUpperCase('tr-TR');
-        const key = JSON.stringify([props.font, props.sz, props.b, props.i, props.u, props.s, props.color, props.hl, props.va]);
+        const key = JSON.stringify([props.font, props.sz, props.b, props.i, props.u, props.s, props.color, props.hl, props.va, props.href]);
         const last = parts[parts.length - 1];
         if (last && last.t === 'text' && last.key === key) last.text += s;
         else parts.push({ t: 'text', text: s, key, props });
@@ -476,7 +475,18 @@
       if (n.namespaceURI !== W) continue;
       switch (n.localName) {
         case 'r': runContent(n, ctx, out, rb); break;
-        case 'hyperlink': case 'smartTag': case 'customXml': case 'ins': case 'moveTo': case 'fldSimple': case 'dir': case 'bdo':
+        case 'hyperlink': case 'fldSimple': {
+          // Köprü: dış ilişkili w:hyperlink ya da HYPERLINK alanı (iç yer imleri düz metin kalır)
+          const rel = n.localName === 'hyperlink' && ctx.rels.get(n.getAttributeNS(NS.r, 'id'));
+          const fld = n.localName === 'fldSimple' && /HYPERLINK\s+"([^"]+)"/i.exec(wa(n, 'instr') || '');
+          const prev = ctx.href;
+          const href = rel && rel.external ? app.safeHref(rel.target) : fld ? app.safeHref(fld[1]) : null;
+          if (href) ctx.href = href;
+          walkInline(n, ctx, out, rb);
+          ctx.href = prev;
+          break;
+        }
+        case 'smartTag': case 'customXml': case 'ins': case 'moveTo': case 'dir': case 'bdo':
           walkInline(n, ctx, out, rb);
           break;
         case 'sdt': walkInline(kid(n, W, 'sdtContent') || n, ctx, out, rb); break;
@@ -485,16 +495,20 @@
     }
   }
 
-  function runProps(ctx, r, rb) {
+  function runProps(ctx, r, rb, href) {
     const rPr = kid(r, W, 'rPr');
     const o = { ...rb };
     const rStyle = wa(kid(rPr, W, 'rStyle'), 'val');
-    if (rStyle) for (const s of ctx.styles.chain(rStyle)) applyRPr(s.rPr, o, ctx.theme);
+    // Köprüdeki "Hyperlink" stilinin mavisi ve alt çizgisi düzenleyicide köprünün kendi görünümü: biçim olarak alınmaz
+    const chain = rStyle ? ctx.styles.chain(rStyle) : [];
+    if (!(href && chain.some((s) => /^(followed)?hyperlink$/.test(s.name)))) for (const s of chain) applyRPr(s.rPr, o, ctx.theme);
     return applyRPr(rPr, o, ctx.theme);
   }
 
   function runContent(r, ctx, out, rb) {
-    const props = runProps(ctx, r, rb);
+    const href = ctx.href || ctx.fldHref || null;
+    const props = runProps(ctx, r, rb, href);
+    props.href = href;
     const handle = (c) => {
       if (c.namespaceURI === NS.mc && c.localName === 'AlternateContent') return altContent(c, (el) => [...el.children].forEach(handle));
       if (c.namespaceURI !== W) return;
@@ -511,10 +525,18 @@
         case 'noBreakHyphen': out.text('-', props); break;
         case 'fldChar': {
           const t = wa(c, 'fldCharType');
-          if (t === 'begin') ctx.inInstr = true;
-          else ctx.inInstr = false; // separate / end: alan sonucu (görünen metin) okunur
+          if (t === 'begin') {
+            ctx.inInstr = true;
+            ctx.instr = '';
+          } else {
+            ctx.inInstr = false; // separate / end: alan sonucu (görünen metin) okunur
+            const m = t === 'separate' && /HYPERLINK\s+"([^"]+)"/i.exec(ctx.instr || '');
+            if (m) ctx.fldHref = app.safeHref(m[1]);
+            if (t === 'end') ctx.fldHref = null;
+          }
           break;
         }
+        case 'instrText': if (ctx.inInstr) ctx.instr += c.textContent; break;
         case 'drawing': drawing(c, ctx, out); break;
         case 'pict': case 'object': vml(c, ctx, out); break;
         case 'footnoteReference': case 'endnoteReference': ctx.report.notes++; break;
@@ -579,13 +601,13 @@
       return;
     }
     const sr = all(el, NS.a, 'srcRect')[0];
-    const crop = sr ? ['l', 't', 'r', 'b'].map((k) => Math.max(0, num(sr, k) / 100000)) : null;
+    const crop = sr ? ['l', 't', 'r', 'b'].map((k) => Math.max(0, num(sr, k) / 100000)) : null; // dışa genişletme (eksi) yok sayılır
     const xf = all(el, NS.a, 'xfrm')[0];
     ctx.images.push({
       ...rec,
       id: 'im' + ++ctx.seq,
       path: rel.target,
-      crop: crop && crop.some((v) => v > 0.001) ? crop : null,
+      crop: crop && crop.some((v) => v > 0.001) && crop[0] + crop[2] < 0.99 && crop[1] + crop[3] < 0.99 ? crop : null,
       rot: xf ? num(xf, 'rot') / 60000 : 0,
     });
     ctx.lastImage = ctx.images[ctx.images.length - 1];
@@ -700,6 +722,7 @@
     const out = makePara();
     ctx.lastImage = null;
     ctx.inInstr = false;
+    ctx.fldHref = null;
     const boxes = (ctx.pendingBoxes = []);
     if (info.numText) out.text(info.numText + ' ', info.rb);
     walkInline(p, ctx, out, info.rb);
@@ -817,6 +840,7 @@
     if (p.i) h = `<i>${h}</i>`;
     if (p.u) h = `<u>${h}</u>`;
     if (p.s) h = `<s>${h}</s>`;
+    if (p.href) h = `<a href="${esc(p.href)}">${h}</a>`;
     return h;
   }
 
@@ -1017,25 +1041,12 @@
   // ---------- Resimler ----------
   const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', jpe: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml' };
 
-  async function cropAsset(a, [l, t, r, b]) {
-    const img = await SS.loadImage(a.src);
-    const W0 = img.naturalWidth;
-    const H0 = img.naturalHeight;
-    const sw = W0 * (1 - l - r);
-    const sh = H0 * (1 - t - b);
-    if (sw < 2 || sh < 2) return a;
-    const c = document.createElement('canvas');
-    c.width = Math.round(sw);
-    c.height = Math.round(sh);
-    c.getContext('2d').drawImage(img, W0 * l, H0 * t, sw, sh, 0, 0, c.width, c.height);
-    return { src: c.toDataURL(a.mime, 0.92), mime: a.mime, nw: c.width, nh: c.height };
-  }
-
+  // Word'ün kırpması resmi değiştirmez: tam resim alınır, kırpma img.crop olarak kalır (değiştirilebilir, sıfırlanabilir)
   async function loadAssets(ctx) {
     const assets = {};
     const byKey = new Map();
     for (const r of ctx.images) {
-      const key = r.path + '|' + (r.crop ? r.crop.join(',') : '');
+      const key = r.path;
       if (byKey.has(key)) {
         r.asset = byKey.get(key);
         continue;
@@ -1048,8 +1059,7 @@
         continue;
       }
       try {
-        let a = await SS.prepareImage(new Blob([await bytesOf(e)], { type: mime }));
-        if (r.crop) a = await cropAsset(a, r.crop);
+        const a = await SS.prepareImage(new Blob([await bytesOf(e)], { type: mime }));
         const id = SS.uid('a');
         assets[id] = a;
         byKey.set(key, id);
@@ -1129,6 +1139,7 @@
       wrap = r.wrap;
     }
     const img = { id: SS.uid('img'), asset: r.asset, page: Math.max(0, page), x, y, w, h, rot: r.rot || 0, wrap, locked: false, z };
+    if (r.crop) img.crop = r.crop.slice();
     if (r.caption) img.caption = { ...r.caption };
     app.clampToPage(img);
     app.state.images.push(img);
@@ -1219,6 +1230,9 @@
       images: [],
       seq: 0,
       inInstr: false,
+      instr: '',
+      href: null, // açık köprü (w:hyperlink)
+      fldHref: null, // HYPERLINK alanının adresi
       pendingBoxes: [],
       lastImage: null,
       report: { images: 0, captions: 0, tables: 0, textboxes: 0, charts: 0, other: 0, skipped: 0, unsupported: 0, notes: 0 },
@@ -1231,10 +1245,8 @@
     ctx.report.hf = [...hfRes.hf.header, ...hfRes.hf.footer].some(Boolean);
     ctx.report.hfLost = hfRes.lost;
     const assets = await loadAssets(ctx);
-    let title = file.name.replace(/\.docx$/i, '');
-    const core = await pkg.xml('docProps/core.xml');
-    const t = core && core.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', 'title')[0];
-    if (t && t.textContent.trim()) title = t.textContent.trim();
+    // Belge adı Word'deki gibi dosya adıdır (belge özelliklerindeki "Başlık" değil): kaydetme ve Word'e aktarma bu adı önerir
+    const title = file.name.replace(/\.docx$/i, '');
 
     app.load({ app: 'SerbestSayfa', title, page, hf: hfRes.hf, html, images: [], assets });
     placeAll(ctx);

@@ -41,8 +41,9 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 ### Layout model (core.js): the central idea
 
 - **Images are not part of the text.** Each image is a plain object:
-  `{id, asset, page, x, y, w, h, rot, wrap, locked, z, caption?}`
+  `{id, asset, page, x, y, w, h, rot, wrap, locked, z, caption?, crop?}`
   `x` and `y` are px (96 DPI) from the top-left of the image's page. The bitmaps live separately in `state.assets[assetId]` as data URLs, which keeps history snapshots small. Units elsewhere: 1 px = 15 twips = 9525 EMU (`SS.units`).
+  - `crop = [left, top, right, bottom]` are the fractions (0–1) cut from the original bitmap; `x/y/w/h` is the visible frame. Cropping never changes the asset: `.img-obj.cropped` clips and the inner `<img>` is offset with `app.cropStyle(crop)`. Export writes `a:srcRect`; import keeps Word's `srcRect` as `crop` (no longer bakes it into the bitmap). Always assign a new array (clones share it).
 - **All pages share one text flow.** The text is a single `contenteditable` `#editor`. It sits inside `#flow`, which is absolutely positioned at page 0's margin box.
 - **No-text zones are float "bands".** Page margins, gaps between pages and text-wrapping images are turned into invisible `.ex` floats:
   - `computeBands()` turns page boundaries and image boxes into horizontal bands. Each band excludes the full width, the left side or the right side.
@@ -84,6 +85,7 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
   - Native undo is intercepted: `beforeinput` `historyUndo`/`historyRedo` and Ctrl+Z.
   - Every user-visible change must end with `app.commit(...)`.
 - **`.sayfa` files** are the JSON from `app.serialize()`: `app: 'SerbestSayfa'`, the HTML, the images, the used assets, the page settings and `hf` (header/footer). Old files with `pageNumbers: true` load as a centered `{sayfa}` footer.
+  - `app.load()` checks the top-level field types before touching the open document, so a broken file can't half-load. User-facing errors are thrown as plain `Error` with a Turkish message; `loadFile` shows those and replaces browser errors (`TypeError`, `SyntaxError`…) with a generic Turkish message.
 - **Header/footer** (`state.hf`): `{ header: [left, center, right], footer: [...], firstPage }`. Slots are plain text with `{sayfa}` / `{toplam}` tokens. They are drawn on the pages (`renderPages`), exported as header/footer parts with center/right tab stops and PAGE/NUMPAGES fields (`firstPage` → `titlePg` + empty first-page parts), and imported from the first non-empty paragraph of Word's default header/footer.
 - **Autosave** is per tab: IndexedDB key `autosave:<tab id>`, where the tab id lives in `sessionStorage`. Each open tab holds a Web Lock (`serbestsayfa-sekme:<id>`). A new tab adopts only records whose lock is free (closed tabs). The old single `autosave` key is adopted the same way.
   - On `pagehide`, `beforeunload` and `visibilitychange→hidden`, unsaved changes are also written synchronously to `localStorage` (`serbestsayfa-acil:<id>`), because async IndexedDB writes don't survive unload. On startup the newer of the two is used.
@@ -95,9 +97,16 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 - **Block structure.** Chrome's list commands can put the list inside the paragraph (`<p><ol>…</ol></p>`). Re-parsing that HTML creates empty paragraphs. `app.normalizeBlocks()` splits such paragraphs after every edit (`ensureContent`); after `load`/undo it also drops the parser's childless `<p></p>`.
 - **Line spacing** is stored in CSS `line-height`: a unitless value is a Word "multiple" × the font's single-line factor (`SS.lineFactor`, measured with `line-height: normal`; Calibri 1.221). A value with units is Word's "at least". `app.lineSpacing(block)` / `app.cssLineHeight(block, multiple)` convert. The default (`.editor`, 1.3177) is Word's 1.08 lines. Export writes `lineRule="auto"` / `atLeast`.
 - **Backspace at a paragraph start** (`backspaceAtStart`) follows Word: first a list item becomes an indented paragraph (the list splits and numbering continues via `ol[start]`), then the first-line indent goes, then the left indent shrinks by 1.27 cm, then a preceding page break (`.pb`) is removed.
+- **Tab** (`tabKey`): multiple paragraphs or a whole paragraph selected → indent/list level up; at a list item's start → level down; elsewhere a tab character. **Shift+Tab**: list item → level up; at a paragraph start → first-line indent, then left indent (`outdentBlock`, shared with Backspace).
+- **Paragraph mark.** A selection that ends at offset 0 of the next paragraph (triple-click, Shift+Down) includes the paragraph mark, as in Word. `beforeinput` deletions go through `deleteParagraphs()`: whole paragraphs from their start are removed as units (the next paragraph keeps its own style); otherwise the range is trimmed to the end of the paragraph so Chrome doesn't merge the next one in. Typing, paste and the link dialog call `app.trimParagraphMark()` first; `app.deleteSelection()` deletes with the same rules.
+- **Internal clipboard.** Copy/cut from the editor write HTML wrapped in `data-serbestsayfa="paragraf|metin"`. Pasting it skips the sanitizer: whole paragraphs go in as blocks with their own styles (`insertParagraphs`), inline copies as a DOM insertion (`insertInline`, keeping the source block's font and size). Don't use `insertHTML` for this: Chrome drops style spans. Anything else is external and goes through `app.sanitizeHTML()`.
+- **Removing a list** (list buttons when every selected item is already in that list type) is done by `removeList`/`rebuildList`, not Chrome: each selected item becomes its own paragraph, unselected items are rebuilt at their level and renumbered with `ol[start]`. Creating lists and switching list type are still Chrome's.
+- `normalizeBlocks` turns Chrome's `span[style*=vertical-align]` (typing style for sub/superscript) into `<sup>/<sub>` and splits them around nested baseline spans.
 - The Paragraph dialog (`app.paragraphDialog`) writes `margin-left/right`, `text-indent` (+ first line, − hanging), `margin-top/bottom` in pt and line spacing. The ruler (`ruler.js`) shows and drags the same indents for the caret's paragraph (read-only for list items, whose indent comes from the list level).
-- Paste goes through `app.sanitizeHTML()`. It reduces Word and web HTML to `p/h1-3/ul/ol/li/b/i/u/s/sub/sup/span/br` and `.pb`, turns Word's fake list paragraphs (with their `mso-list` levels) into nested lists, and keeps Word's pt/cm paragraph indents and spacing and `line-height: %`.
+- Paste goes through `app.sanitizeHTML()`. It reduces Word and web HTML to `p/h1-3/ul/ol/li/b/i/u/s/sub/sup/span/a[href]/br` and `.pb`, turns Word's fake list paragraphs (with their `mso-list` levels) into nested lists, and keeps Word's pt/cm paragraph indents and spacing and `line-height: %`.
 - Keep editor HTML within that vocabulary (plus `ol[start]`). Export and import only understand it.
+- **Links** are `<a href>` with `http:`, `https:` or `mailto:` only (`app.safeHref`; anything else stays plain text on paste, `.sayfa` load and import). Ctrl+K / the toolbar button open `app.linkDialog()` (add, edit, remove; `www.…` → `https://`, e-mail → `mailto:`); Ctrl+click opens a link. Export: `w:hyperlink r:id` + external relationship + `Hyperlink` character style (blue/underline come from the style, not direct formatting). Import: `w:hyperlink`, `w:fldSimple` and complex `HYPERLINK` fields; the Hyperlink style's look is not copied onto link runs.
+- **Font boxes** are editable combos (`.combo`: the list is the `<select>` underneath, the value is typed in the `<input>` on top; Enter applies, Esc/blur reverts). Sizes are rounded to half points (1–1638). `FONTS` in `text.js` is the curated font list: the dropdown shows the installed ones (canvas width check), paste keeps all of them.
 - Find & replace (`find.js`) highlights matches with the CSS Custom Highlight API (no DOM changes) and edits text nodes directly. Replace All also covers captions and is one undo step.
 
 ### Objects (objects.js)
@@ -105,6 +114,14 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 - Pointer handling runs in the capture phase on `#doc`. The `mousedown` that follows is cancelled through `blockMouse`, so text focus and selection aren't disturbed.
 - Images behind the text can be selected only where no glyph is under the pointer (`isOverText`), or with Alt held.
 - Captions are edited in place with `contenteditable="plaintext-only"`. Global key and paste handlers skip `.cap-text`.
+- **Inserting images** (`makeImage`, `caretSpot`): at a paragraph start the image goes on the caret line (the paragraph continues below it); otherwise below the caret's line (`caretLineRect` + `WRAP_DIST` + 2 px, because Chrome can round the line box up). Images inserted together stack below each other; one that doesn't fit goes to the top of the next page.
+- **Crop mode** (`app.toggleCrop`, "Kırp"): crop handles cut the frame while the image stays put (`fullImage`/`applyCrop`, in the image's own rotated axes); dragging the image pans it under the frame. Esc/Enter end it; the overlay shows the cut-away part faded (`.crop-ghost`, `clip-path` with a hole).
+- After Esc, Delete or the delete button, focus returns to the text at the last caret (`returnToText`). Cut doesn't, so paste keeps its target rule (`pasteTarget`).
+
+### Shell (main.js)
+
+- Dialogs are `<form method="dialog">`. Enter submits with the **first submit button**, so "Vazgeç" buttons are `type="button" value="cancel"` and closed by a shared handler; keep "Uygula" the first submit button.
+- Header/footer is edited in the page setup dialog: `pageSetup(focus)` opens it on a slot (`h0…h2`, `f0…f2`). Double-clicking a page's top/bottom margin opens the slot under the pointer (`hfSlotAt`); the toolbar has a header/footer button.
 
 ### DOCX export (docx.js)
 
@@ -129,4 +146,5 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 - **Caption attachment** looks for:
   - A paragraph right after (or right before) an image-only paragraph that matches `CAPTION_RE` or uses the `caption` style.
   - A caption-like text box in the same drawing or group.
+- The document name is the file name (not `dc:title`). Only "heading 1–9" styles and explicit outline levels become headings; "Title" is a Normal paragraph with its formatting.
 - **Lossy conversions:** tables become tab-separated paragraphs. EMF/WMF/TIFF images, charts, footnotes and header/footer content beyond the first text line are skipped, and `SS.importSummary()` tells the user how many.

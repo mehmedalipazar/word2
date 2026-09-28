@@ -12,6 +12,7 @@
   const GRID = U.cmToPx(0.5);
   const HANDLES = [['nw', 0, 0], ['n', 0.5, 0], ['ne', 1, 0], ['e', 1, 0.5], ['se', 1, 1], ['s', 0.5, 1], ['sw', 0, 1], ['w', 0, 0.5]];
   let guides = [];
+  let cropping = null; // kırpma kipindeki resmin kimliği
 
   const selImages = () => state.selection.map(app.getImage).filter(Boolean);
   app.selImages = selImages;
@@ -76,11 +77,13 @@
     const frag = document.createDocumentFragment();
     const imgs = selImages();
     const single = imgs.length === 1;
+    if (cropping && !(single && imgs[0].id === cropping && !imgs[0].locked)) cropping = null; // seçim değişti, geri alındı…
     for (const img of imgs) {
       const box = document.createElement('div');
-      box.className = 'sel-box' + (img.locked ? ' locked' : single ? '' : ' multi');
+      box.className = 'sel-box' + (img.locked ? ' locked' : single ? '' : ' multi') + (cropping ? ' cropping' : '');
       box.style.cssText = `left:${img.x}px;top:${img.page * g.stride + img.y}px;width:${img.w}px;height:${img.h}px;transform:rotate(${img.rot || 0}deg)`;
-      if (single && !img.locked) {
+      if (cropping) cropHandles(box, img);
+      else if (single && !img.locked) {
         for (const [h, x, y] of HANDLES) {
           const d = document.createElement('div');
           d.className = 'handle';
@@ -163,9 +166,14 @@
       range = caretRangeAt(cx, e.clientY);
     }
     if (!range || !els.editor.contains(range.startContainer)) {
+      // Metnin altı: belgenin son metin konumu (eleman düzeyinde değil; imlecin satırı ölçülebilsin)
       const last = els.editor.lastElementChild || els.editor;
       range = document.createRange();
-      if (last.lastChild && last.lastChild.nodeName === 'BR') range.setStartBefore(last.lastChild);
+      const w = document.createTreeWalker(last, NodeFilter.SHOW_TEXT);
+      let t = null;
+      for (let n = w.nextNode(); n; n = w.nextNode()) if (n.nodeValue.length) t = n;
+      if (last.lastChild && last.lastChild.nodeName === 'BR' && !last.textContent) range.setStartBefore(last.lastChild);
+      else if (t) range.setStart(t, t.length);
       else {
         range.selectNodeContents(last);
         range.collapse(false);
@@ -429,6 +437,141 @@
     });
   }
 
+  // ---------- Kırpma ----------
+  // img.crop = [sol, üst, sağ, alt]: özgün resmin kesilen payları (0–1). Çerçeve (x, y, w, h) görünen parçadır;
+  // kırpma resmi değiştirmez (Word'deki gibi sıfırlanabilir, Word'e a:srcRect olarak gider).
+  // Kırpma kipinde tutamaklar çerçevenin kenarlarını keser, resim yerinde kalır; resmi sürüklemek onu çerçevenin
+  // altında kaydırır. Döndürülmüş resimde de resmin kendi eksenlerinde çalışır.
+  const cropOf = (img) => img.crop || [0, 0, 0, 0];
+
+  function cropHandles(box, img) {
+    const c = cropOf(img);
+    const gh = document.createElement('img');
+    gh.className = 'crop-ghost'; // kesilen kısım soluk; çerçevenin içi (asıl resim) açık kalır
+    gh.draggable = false;
+    gh.alt = '';
+    gh.src = state.assets[img.asset]?.src || '';
+    const [L, T, R, B] = [c[0], c[1], 1 - c[2], 1 - c[3]].map((v) => SS.round(v * 100, 3) + '%');
+    gh.style.cssText = `${app.cropStyle(c)};clip-path:polygon(evenodd,0 0,100% 0,100% 100%,0 100%,0 0,${L} ${T},${R} ${T},${R} ${B},${L} ${B},${L} ${T})`;
+    box.appendChild(gh);
+    for (const [h, x, y] of HANDLES) {
+      const d = document.createElement('div');
+      d.className = 'handle crop';
+      d.dataset.h = h;
+      d.style.left = x * 100 + '%';
+      d.style.top = y * 100 + '%';
+      box.appendChild(d);
+    }
+  }
+
+  // Resmin kırpılmamış hâlinin ölçüsü ve (belge koordinatında) merkezi
+  function fullImage(img) {
+    const c = cropOf(img);
+    const g = app.geom();
+    const th = ((img.rot || 0) * Math.PI) / 180;
+    const FW = img.w / (1 - c[0] - c[2]);
+    const FH = img.h / (1 - c[1] - c[3]);
+    const lx = (FW * (c[0] - c[2])) / 2; // çerçeve merkezinin resim merkezine göre yeri (resmin ekseninde)
+    const ly = (FH * (c[1] - c[3])) / 2;
+    const fx = img.x + img.w / 2;
+    const fy = img.page * g.stride + img.y + img.h / 2;
+    return { FW, FH, cos: Math.cos(th), sin: Math.sin(th), cx: fx - (lx * Math.cos(th) - ly * Math.sin(th)), cy: fy - (lx * Math.sin(th) + ly * Math.cos(th)) };
+  }
+
+  function setCrop(img, c) {
+    c = c.map((v) => (v < 1e-4 ? 0 : SS.round(v, 5)));
+    img.crop = c.some((v) => v > 0) ? c : null;
+    return c;
+  }
+  // Yeni kırpma paylarıyla çerçeveyi, resim yerinde kalacak biçimde kur
+  function applyCrop(img, F, c) {
+    const pageTop = img.page * app.geom().stride;
+    c = setCrop(img, c);
+    img.w = F.FW * (1 - c[0] - c[2]);
+    img.h = F.FH * (1 - c[1] - c[3]);
+    const lx = (F.FW * (c[0] - c[2])) / 2;
+    const ly = (F.FH * (c[1] - c[3])) / 2;
+    img.x = F.cx + lx * F.cos - ly * F.sin - img.w / 2;
+    img.y = F.cy + lx * F.sin + ly * F.cos - img.h / 2 - pageTop;
+  }
+
+  // h: kırpma tutamağı (nw, n, …); null: resmi çerçevenin altında kaydır
+  function startCrop(e, h) {
+    const img = app.getImage(cropping);
+    if (!img || img.locked) return;
+    const F = fullImage(img);
+    const c0 = cropOf(img);
+    const local = (ev) => {
+      const p = app.toDoc(ev);
+      const vx = p.x - F.cx;
+      const vy = p.y - F.cy;
+      return { x: vx * F.cos + vy * F.sin, y: -vx * F.sin + vy * F.cos };
+    };
+    const p0 = local(e);
+    const minW = MIN / F.FW;
+    const minH = MIN / F.FH;
+    let moved = false;
+    track(
+      (ev) => {
+        const p = local(ev);
+        const dx = (p.x - p0.x) / F.FW;
+        const dy = (p.y - p0.y) / F.FH;
+        let [l, t, r, b] = c0;
+        if (!h) {
+          const mx = SS.clamp(dx, -r, l);
+          const my = SS.clamp(dy, -b, t);
+          [l, r, t, b] = [l - mx, r + mx, t - my, b + my];
+        } else {
+          if (h.includes('w')) l = SS.clamp(l + dx, 0, 1 - r - minW);
+          if (h.includes('e')) r = SS.clamp(r - dx, 0, 1 - l - minW);
+          if (h.includes('n')) t = SS.clamp(t + dy, 0, 1 - b - minH);
+          if (h.includes('s')) b = SS.clamp(b - dy, 0, 1 - t - minH);
+        }
+        if (!moved) {
+          if (Math.hypot(p.x - p0.x, p.y - p0.y) * state.zoom < 2) return;
+          moved = true;
+          document.body.classList.add('dragging');
+        }
+        if (h) applyCrop(img, F, [l, t, r, b]);
+        else setCrop(img, [l, t, r, b]); // kaydırma: çerçeve yerinde, resim altında kayar
+        app.updateImageEl(img);
+        if (app.wrapsText(img)) app.scheduleLayout();
+        app.renderOverlay();
+        app.updateCtxBar();
+      },
+      () => {
+        if (moved) {
+          app.renderImages();
+          app.layout();
+          app.commit('edit');
+        }
+        app.renderOverlay();
+        app.updateCtxBar();
+      }
+    );
+  }
+
+  app.isCropping = () => !!cropping;
+  app.toggleCrop = function () {
+    const imgs = selImages();
+    if (cropping) cropping = null;
+    else if (imgs.length !== 1) return SS.toast('Kırpmak için tek bir resim seçin.');
+    else if (imgs[0].locked) return SS.toast('Kilitli resim kırpılamaz; önce kilidi açın.');
+    else cropping = imgs[0].id;
+    app.renderOverlay();
+    app.updateCtxBar();
+  };
+  // Kırpmayı sıfırla: resmin tamamı, aynı ölçekte ve yerinde
+  app.resetCrop = function () {
+    const imgs = selImages().filter((i) => i.crop && !i.locked);
+    if (!imgs.length) return;
+    for (const img of imgs) {
+      applyCrop(img, fullImage(img), [0, 0, 0, 0]);
+      clampToPage(img);
+    }
+    finishEdit();
+  };
+
   // ---------- Fare olayları ----------
   // pointerdown'da işi yapıyoruz; odak/metin seçimi değişmesin diye ardından gelen mousedown'ı engelliyoruz.
   let blockMouse = false;
@@ -443,13 +586,16 @@
       if (handle) {
         blockMouse = true;
         e.stopPropagation();
-        startHandle(e, handle.dataset.h);
+        if (handle.classList.contains('crop')) startCrop(e, handle.dataset.h);
+        else startHandle(e, handle.dataset.h);
         return;
       }
-      const id = hitImage(e);
+      const id = e.target.closest && e.target.closest('.crop-ghost') ? cropping : hitImage(e);
       if (id) {
         blockMouse = true;
         e.stopPropagation();
+        // Kırpma kipinde resmi (ya da soluk kesilen kısmını) sürüklemek resmi çerçevenin altında kaydırır
+        if (id === cropping && !e.target.closest('.cap')) return startCrop(e, null);
         if (e.shiftKey || e.ctrlKey || e.metaKey) return app.select(id, true);
         if (!state.selection.includes(id)) app.select(id);
         else dropTextFocus();
@@ -490,8 +636,15 @@
     const k = e.key;
     if (k === 'Delete' || k === 'Backspace') {
       e.preventDefault();
-      app.deleteSelected();
-    } else if (k === 'Escape') app.clearSelection();
+      app.deleteSelected(true);
+    } else if (cropping && (k === 'Escape' || k === 'Enter')) {
+      e.preventDefault();
+      app.toggleCrop(); // kırpma biter, resim seçili kalır
+    } else if (k === 'Escape') {
+      const img = selImages()[0];
+      app.clearSelection();
+      returnToText(img);
+    }
     else if (k.startsWith('Arrow') && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       const step = e.shiftKey ? 10 : 1;
@@ -609,13 +762,37 @@
     imgs.forEach((i) => (i.locked = lock));
     finishEdit();
   };
-  app.deleteSelected = function () {
+  // toText (Delete tuşu, Sil düğmesi): ardından yazma metinde sürer. Kesmede kullanılmaz: yapıştırma yeri
+  // eskisi gibi görünen sayfa kalsın (pasteTarget).
+  app.deleteSelected = function (toText) {
     const del = new Set(state.selection);
     if (!del.size) return;
+    const first = selImages()[0];
     state.images = state.images.filter((i) => !del.has(i.id));
     state.selection = [];
     finishEdit();
+    if (toText) returnToText(first);
   };
+
+  // Resim seçimi Esc ya da silmeyle bırakılınca odak metne, son imleç yerine döner (Word gibi yazma sürer).
+  // Metinde henüz imleç olmadıysa resmin üst kenarının hizasındaki satıra konur.
+  function returnToText(img) {
+    const r = app.getCaretRange && app.getCaretRange();
+    if (r && els.editor.contains(r.startContainer)) return app.focusEditor();
+    let range = null;
+    if (img) {
+      const g = app.geom();
+      const d = els.doc.getBoundingClientRect();
+      const y = d.top + (img.page * g.stride + SS.clamp(img.y, g.m.t, g.PH - g.m.b - 1)) * state.zoom;
+      range = caretRangeAt(els.flow.getBoundingClientRect().left + 2, y);
+    }
+    els.editor.focus({ preventScroll: true });
+    if (range && els.editor.contains(range.startContainer)) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
 
   // target (yapıştırma): { page, y } → grup o sayfaya, üst kenarı y'de olacak biçimde taşınır (x korunur)
   function cloneImages(list, offset, target) {
@@ -754,6 +931,10 @@
     const bar = document.getElementById('ctxbar');
     bar.querySelectorAll('[data-wrap]').forEach((b) => b.classList.toggle('active', imgs.every((i) => i.wrap === b.dataset.wrap)));
     bar.querySelector('[data-cmd="toggleLock"]').classList.toggle('active', imgs.every((i) => i.locked));
+    const cropBtn = bar.querySelector('[data-cmd="crop"]');
+    cropBtn.classList.toggle('active', !!cropping);
+    cropBtn.disabled = imgs.length !== 1 || imgs[0].locked;
+    bar.querySelector('[data-cmd="resetCrop"]').disabled = !imgs.some((i) => i.crop && !i.locked);
     bar.querySelectorAll('[data-align^="dist"]').forEach((b) => (b.disabled = imgs.length < 3));
     const caps = imgs.filter((i) => i.caption);
     bar.querySelector('[data-cmd="toggleCaption"]').classList.toggle('active', caps.length === imgs.length);
@@ -835,21 +1016,61 @@
   }
 
   // ---------- Resim ekleme ----------
+  // İmlecin satırının kutusu (ekran px): imleçten önceki karakterin (satır sonunda doğru satırı verir),
+  // yoksa sonrakinin kutusu. Boş paragrafta paragrafın kendisi.
+  function caretLineRect(r) {
+    const rr = document.createRange();
+    const box = (node, a, b) => {
+      rr.setStart(node, a);
+      rr.setEnd(node, b);
+      const rs = [...rr.getClientRects()].filter((x) => x.height > 0);
+      return rs[rs.length - 1] || null;
+    };
+    let n = r.startContainer;
+    let o = r.startOffset;
+    if (n.nodeType === 1) {
+      // eleman düzeyindeki imleç: önceki metin düğümünün sonuna iner
+      const before = document.createRange();
+      before.setStart(els.editor, 0);
+      before.setEnd(n, o);
+      const w = document.createTreeWalker(els.editor, NodeFilter.SHOW_TEXT);
+      let t = null;
+      for (let x = w.nextNode(); x && before.isPointInRange(x, 0); x = w.nextNode()) if (x.nodeValue.length) t = x;
+      if (t && before.isPointInRange(t, t.length)) [n, o] = [t, t.length];
+    }
+    if (n.nodeType === 3) {
+      const x = (o > 0 && box(n, o - 1, o)) || (o < n.length && box(n, o, o + 1));
+      if (x) return { rect: x, el: n.parentElement };
+    }
+    const el = n.nodeType === 1 ? n : n.parentElement;
+    return { rect: el.getBoundingClientRect(), el };
+  }
+
+  // Resmin imleçteki yeri (Word gibi): imleç paragrafın başındaysa satırın üstüne (paragraf resmin
+  // altından sürer); değilse imlecin satırının altına (satır ve öncesi yerinde kalır).
   function caretSpot() {
     const g = app.geom();
     const r = app.getCaretRange && app.getCaretRange();
     if (r && els.editor.contains(r.startContainer)) {
-      const rects = r.getClientRects();
-      const host = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-      const rc = rects.length ? rects[0] : host.getBoundingClientRect();
-      const docY = (rc.top - els.doc.getBoundingClientRect().top) / state.zoom;
-      const page = pageAtY(docY);
+      const { rect, el } = caretLineRect(r);
+      const block = el.closest('p,h1,h2,h3,h4,h5,h6,li,div') || els.editor;
+      const pre = document.createRange();
+      pre.setStart(block, 0);
+      pre.setEnd(r.startContainer, r.startOffset);
+      const atStart = !pre.toString().length;
+      const d = els.doc.getBoundingClientRect().top;
+      const mid = ((rect.top + rect.bottom) / 2 - d) / state.zoom;
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || (rect.bottom - rect.top) / state.zoom;
+      const page = pageAtY(mid);
+      // +2 px: Chrome satır kutusunu yazı tipi ölçülerini yuvarlayarak kesirli piksel uzatabiliyor; şerit satıra değmesin
+      const docY = atStart ? (rect.top - d) / state.zoom : mid + lh / 2 + app.WRAP_DIST + 2;
       return { page, y: docY - page * g.stride };
     }
     return { page: app.visiblePage ? app.visiblePage() : 0, y: g.m.t };
   }
 
-  function makeImage(assetId, a, at, offset) {
+  // prev: aynı anda eklenen bir önceki resim; yenisi onun altına gelir (Word'de art arda eklenen resimler gibi)
+  function makeImage(assetId, a, at, prev) {
     const g = app.geom();
     let w = Math.min(a.nw, g.cw * 0.8);
     let h = (w * a.nh) / a.nw;
@@ -864,16 +1085,26 @@
     if (at) {
       // Bırakıldığı yere, fare ortada olacak şekilde
       page = at.page;
-      x = at.x - w / 2 + offset;
-      y = at.y - h / 2 + offset;
+      x = at.x - w / 2;
+      y = at.y - h / 2;
       wrap = w > g.cw * 0.6 ? 'topbottom' : 'square';
     } else {
       // İmlecin olduğu satıra, ortalanmış (Word'deki "metinle aynı hizada" eklemeye benzer)
       const c = caretSpot();
       page = c.page;
-      x = g.m.l + (g.cw - w) / 2 + offset;
-      y = c.y + offset;
+      x = g.m.l + (g.cw - w) / 2;
+      y = c.y;
       wrap = 'topbottom';
+    }
+    if (prev) {
+      page = prev.page;
+      x = prev.x + prev.w / 2 - w / 2;
+      y = prev.y + prev.h + 2 * app.WRAP_DIST;
+    }
+    // Sayfanın kalanına sığmıyorsa sonraki sayfanın başına (Word'deki satır içi resim gibi)
+    if ((!at || prev) && y + h > g.PH - g.m.b + 0.5 && h <= g.ch) {
+      page += 1;
+      y = g.m.t;
     }
     y = SS.clamp(y, g.m.t, Math.max(g.m.t, g.PH - g.m.b - h));
     x = SS.clamp(x, 0, Math.max(0, g.PW - w));
@@ -889,7 +1120,7 @@
         const a = await SS.prepareImage(f);
         const assetId = SS.uid('a');
         state.assets[assetId] = a;
-        const img = makeImage(assetId, a, at, ids.length * 18);
+        const img = makeImage(assetId, a, at, app.getImage(ids[ids.length - 1]));
         state.images.push(img);
         ids.push(img.id);
       } catch (err) {
@@ -919,6 +1150,20 @@
   // ---------- Pano (kopyala / kes / yapıştır) ----------
   let clip = null;
   const CLIP_MARK = 'serbestsayfa-nesne:';
+  // Başka programlara giden resim: kırpılmışsa yalnızca görünen parça
+  function visibleSrc(i) {
+    const a = state.assets[i.asset];
+    const im = i.crop && els.doc.querySelector(`.img-obj[data-id="${i.id}"] img`);
+    if (!im || !im.complete || !im.naturalWidth) return a.src;
+    const [l, t, r, b] = i.crop;
+    const W = im.naturalWidth;
+    const H = im.naturalHeight;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(W * (1 - l - r)));
+    c.height = Math.max(1, Math.round(H * (1 - t - b)));
+    c.getContext('2d').drawImage(im, W * l, H * t, c.width, c.height, 0, 0, c.width, c.height);
+    return c.toDataURL(a.mime === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.92);
+  }
   function copySel(e, cut) {
     if (!app.objectsFocused()) return;
     const imgs = selImages();
@@ -927,7 +1172,7 @@
     // Başka programlara (ör. Word) yapıştırılabilsin diye HTML olarak da koy
     e.clipboardData.setData(
       'text/html',
-      imgs.map((i) => `<img src="${state.assets[i.asset].src}" width="${Math.round(i.w)}" height="${Math.round(i.h)}">`).join('')
+      imgs.map((i) => `<img src="${visibleSrc(i)}" width="${Math.round(i.w)}" height="${Math.round(i.h)}">`).join('')
     );
     e.preventDefault();
     if (cut) app.deleteSelected();

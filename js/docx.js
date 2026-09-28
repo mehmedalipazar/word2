@@ -158,6 +158,9 @@
     for (const img of byZ) (imgsOnPage[img.page] = imgsOnPage[img.page] || []).push(img);
     let docPrId = 0;
 
+    // Kırpma (img.crop, 0–1) → a:srcRect (yüz binde bir)
+    const srcRect = (c) =>
+      c ? `<a:srcRect ${['l', 't', 'r', 'b'].map((k, i) => `${k}="${Math.round(c[i] * 100000)}"`).join(' ')}/>` : '';
     function drawing(img, noWrap) {
       const m = mediaFor(img.asset);
       const id = ++docPrId;
@@ -184,7 +187,7 @@
         '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
         '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic>' +
         `<pic:nvPicPr><pic:cNvPr id="${id}" name="${m.name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
-        `<pic:blipFill><a:blip r:embed="${m.rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+        `<pic:blipFill><a:blip r:embed="${m.rId}"/>${srcRect(img.crop)}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
         `<pic:spPr><a:xfrm${rot ? ` rot="${rot}"` : ''}><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
         '</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>'
       );
@@ -299,6 +302,8 @@
       if (rPrCache.has(key)) return rPrCache.get(key);
       const cs = getComputedStyle(el);
       const p = [];
+      const inLink = !!el.closest('a');
+      if (inLink) p.push('<w:rStyle w:val="Hyperlink"/>'); // rPr'nin ilk öğesi; mavi renk ve alt çizgi stilden gelir
       const font = firstFamily(cs.fontFamily);
       if (font !== DEFAULT_FONT) p.push(`<w:rFonts w:ascii="${esc(font)}" w:hAnsi="${esc(font)}" w:eastAsia="${esc(font)}" w:cs="${esc(font)}"/>`);
       if (parseInt(cs.fontWeight, 10) >= 600) p.push('<w:b/><w:bCs/>');
@@ -311,17 +316,19 @@
       for (let n = el; n; n = n.parentElement) {
         const s = getComputedStyle(n);
         const d = s.textDecorationLine || s.textDecoration || '';
-        if (d.includes('underline')) underline = true;
+        if (d.includes('underline') && n.tagName !== 'A') underline = true;
         if (d.includes('line-through')) strike = true;
         if (!bg && n !== blockEl) bg = rgbToHex(s.backgroundColor);
         if (!va && (n.tagName === 'SUP' || n.tagName === 'SUB')) va = n.tagName === 'SUP' ? 'superscript' : 'subscript';
+        else if (!va && /^(super|sub)$/.test(s.verticalAlign)) va = s.verticalAlign === 'super' ? 'superscript' : 'subscript';
         if (n === blockEl || n === ed) break;
       }
       if (strike) p.push('<w:strike/>');
       const color = rgbToHex(cs.color);
-      if (color && color !== '000000') p.push(`<w:color w:val="${color}"/>`);
+      if (color && color !== '000000' && !(inLink && color === '0563C1')) p.push(`<w:color w:val="${color}"/>`);
       let px = parseFloat(cs.fontSize);
-      if (va) px = parseFloat(getComputedStyle(el.closest('sup,sub').parentElement).fontSize);
+      const vaEl = va && el.closest('sup,sub'); // <sup>/<sub> küçültülmüş çizilir: Word'e asıl punto gider
+      if (vaEl) px = parseFloat(getComputedStyle(vaEl.parentElement).fontSize);
       const hp = Math.max(2, Math.round(px * 1.5));
       p.push(`<w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/>`);
       if (underline) p.push('<w:u w:val="single"/>');
@@ -401,13 +408,33 @@
       }
       units.push({ el, o });
     }
+    // Köprüler: aynı <a> içindeki çalıştırmalar tek w:hyperlink'te, adres dış ilişki olarak
+    const links = []; // { rId, href }
+    const linkRel = (href) => {
+      let l = links.find((x) => x.href === href);
+      if (!l) links.push((l = { rId: 'rIdLink' + (links.length + 1), href }));
+      return l.rId;
+    };
+
     // Bir blok -> bir ya da daha fazla w:p (metinsiz sayfa araya girerse paragraf bölünür)
     function emitBlock(el, o) {
       const styleEl = el.nodeType === 3 ? el.parentElement : el;
       const items = collectInline(el);
       const paras = [];
       let cur = { o, runs: [] };
+      let link = null; // açık köprü (<a>)
+      const setLink = (a) => {
+        if (a === link) return;
+        if (link) cur.runs.push('</w:hyperlink>');
+        link = a;
+        if (a) cur.runs.push(`<w:hyperlink r:id="${linkRel(app.safeHref(a.getAttribute('href')))}" w:history="1">`);
+      };
+      const linkOf = (n) => {
+        const a = (n.nodeType === 1 ? n : n.parentElement).closest('a');
+        return a && styleEl.contains(a) && app.safeHref(a.getAttribute('href')) ? a : null;
+      };
       const onEvent = (ev) => {
+        setLink(null);
         if (ev.type === 'anchor') return void cur.runs.push(anchorsFor(ev.page, false));
         const atStart = !cur.runs.length && !paras.length;
         if (!atStart) paras.push(cur);
@@ -419,16 +446,20 @@
         if (node.nodeType === 3) {
           let pos = 0;
           for (const ev of evs) {
+            setLink(linkOf(node));
             if (ev.offset > pos) cur.runs.push(textRuns(node, pos, ev.offset, styleEl));
             pos = Math.max(pos, ev.offset);
             onEvent(ev);
           }
+          setLink(linkOf(node));
           cur.runs.push(textRuns(node, pos, node.length, styleEl));
         } else {
           evs.forEach(onEvent);
+          setLink(linkOf(node));
           if (i < items.length - 1) cur.runs.push('<w:r><w:br/></w:r>'); // bloğun sonundaki <br> satır üretmez
         }
       });
+      setLink(null);
       paras.push(cur);
       for (const p of paras) body.push(p.holder !== undefined ? holderPara(p.holder) : `<w:p>${pPr(styleEl, p.o)}${p.runs.join('')}</w:p>`);
     }
@@ -549,6 +580,7 @@
       '<w:pPrDefault><w:pPr><w:widowControl/><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
       '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +
       '<w:style w:type="character" w:default="1" w:styleId="DefaultParagraphFont"><w:name w:val="Default Paragraph Font"/><w:uiPriority w:val="1"/><w:semiHidden/><w:unhideWhenUsed/></w:style>' +
+      '<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:basedOn w:val="DefaultParagraphFont"/><w:uiPriority w:val="99"/><w:unhideWhenUsed/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style>' +
       heading('Heading1', 'heading 1', 0, 36, 240, 120) +
       heading('Heading2', 'heading 2', 1, 28, 200, 100) +
       heading('Heading3', 'heading 3', 2, 24, 160, 80) +
@@ -572,6 +604,7 @@
       `<Relationship Id="rIdNumbering" Type="${REL}/numbering" Target="numbering.xml"/>` +
       `<Relationship Id="rIdSettings" Type="${REL}/settings" Target="settings.xml"/>` +
       hfParts.map((p) => `<Relationship Id="${p.rId}" Type="${REL}/${p.kind}" Target="${p.file}"/>`).join('') +
+      links.map((l) => `<Relationship Id="${l.rId}" Type="${REL}/hyperlink" Target="${esc(l.href)}" TargetMode="External"/>`).join('') +
       mediaFiles.map((f) => `<Relationship Id="${f.rId}" Type="${REL}/image" Target="${f.name.slice(5)}"/>`).join('') +
       '</Relationships>';
 
