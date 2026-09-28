@@ -443,8 +443,18 @@
       const near = (a, b) => Math.abs(a - b) <= 1;
       const sameSpacing = near(twip(before), st.before * 20) && near(twip(o.mb), st.after * 20) && lineTw !== null && near(lineTw, 240 * st.line);
       if (!sameSpacing) p.push(`<w:spacing w:before="${twip(before)}" w:after="${twip(o.mb)}" ${line}/>`);
-      if (o.numId && o.cont) p.push(`<w:ind w:left="${720 * (o.ilvl + 1)}"/>`);
-      else if (!o.numId) {
+      if (o.numId) {
+        // Liste maddesinin girintisi (core.js: listIndent) düzeyin tanımındakinden (720 × (düzey + 1), 360 asılı) farklıysa
+        // paragrafa yazılır (Word'de paragrafınki önce gelir). Sayfa sonuyla bölünen maddenin devamı metnin hizasında.
+        const L = app.listIndent(blockEl);
+        const left = twip(L.left);
+        const first = twip(L.first);
+        const mr = twip(parseFloat(cs.marginRight) || 0);
+        const right = mr > 0 ? ` w:right="${mr}"` : '';
+        if (o.cont) p.push(`<w:ind w:left="${left}"${right}/>`);
+        else if (Math.abs(left - 720 * (o.ilvl + 1)) > 1 || Math.abs(first + 360) > 1 || right)
+          p.push(`<w:ind w:left="${left}"${right} ${first > 0 ? `w:firstLine="${first}"` : `w:hanging="${-first}"`}/>`);
+      } else {
         // Numaralı başlığın girintisi numaralandırmadan gelir: yalnızca başlığa ayrıca verilmişse (0 da olsa, ikisi
         // birlikte) yazılır
         const own = numbered && !noNum && (blockEl.style.marginLeft || blockEl.style.textIndent);

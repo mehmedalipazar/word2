@@ -41,9 +41,11 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 - **Satır aralığı Word'deki gibi satır cinsinden** (1,0 / 1,08 / 1,15 / 1,5 / 2,0…; "1,5" Word'ün 1,5 satırıdır);
   varsayılan Word'ün Normal stili gibi 1,08 satır + 8 nk paragraf sonrası
 - **Paragraf penceresi** (¶ düğmesi): sol/sağ girinti, ilk satır ya da asılı girinti, önce/sonra aralığı, satır aralığı
-  (tek, 1,5, çift, birden çok, en az); satır aralığı kutusunda "Paragraftan önce/sonra boşluk ekle/kaldır"
+  (tek, 1,5, çift, birden çok, en az); satır aralığı kutusunda "Paragraftan önce/sonra boşluk ekle/kaldır".
+  Liste maddesinde Sol maddenin metninin, Asılı / İlk satır işaretin yeridir
 - **Cetvel**: imlecin paragrafının girintileri; ilk satır, asılı, sol ve sağ girinti işaretleri sürüklenir
-  (0,25 cm'ye yapışır, Alt ile serbest)
+  (0,25 cm'ye yapışır, Alt ile serbest). Liste maddesinde ilk satır işaretin, asılı metnin yeridir; listenin bütün
+  maddeleri seçiliyse bütün düzeye, yoksa seçili maddelere uygulanır (Word gibi)
 - **Sekme durakları**: sola, ortaya, sağa ve ondalık (virgülde hizalar) özel duraklar; dolgu `. . .`, `- - -`, `___`
   (içindekiler satırı gibi). Cetvelin solundaki kutu durağın türünü seçer, cetvele tıklamak seçili paragraflara durak
   koyar; durak sürüklenerek taşınır, cetvelin dışına sürüklenince kalkar, çift tık **Sekmeler** penceresini açar
@@ -57,6 +59,10 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   başlıklara verilmiş numaraları böyle açılır, Word'e başlık stillerine bağlı liste olarak gider.
 - Listeler Word'ün asılı girintisiyle (işaret 0,63 cm, metin 1,27 cm; alt düzeyler 1,27 cm içeride, •/o/▪ ve 1./a./i.);
   maddenin başında Backspace önce işareti kaldırır (metin yerinde kalır), numara sonraki maddelerde sürer.
+- **Liste girintisi** Word'deki gibi sol kenardan ölçülür ve liste (düzey) ya da madde başına ayarlanabilir (cetvel,
+  Paragraf penceresi). Word'den açılan ya da yapıştırılan listenin kendi girintisi korunur (kurumsal şablonlardaki
+  sol kenara dayalı madde işareti, "MADDE 1 –" gibi uzun numaralar için geniş asılı girinti), Word'e aynen gider.
+  Tab / Shift+Tab ile düzeyi değişen madde yeni düzeyin girintisini alır.
 - **Liste biçimi** (liste düğmelerinin yanındaki kutu; Word'ün Madde İşareti / Numaralandırma kitaplığı):
   • – ▪ ➢ ✓ ❖ o madde işaretleri, 1. / 1) / a) / a. / A. / I. / i. / (1) numaraları ve çok düzeyli 1. / 1.1. / 1.1.1.
   Biçim seçili maddelerin düzeyine uygulanır, alt düzeyler (Tab) çok düzeyli biçimi alır. "Numaralandırma değerini
@@ -83,9 +89,14 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   **Bölüme göre numara** (bağlam çubuğundaki kutu): "Şekil 2.1" (Başlık 1'in numarası + sıra, her bölümde yeniden
   başlar); Word'ün "Bölüm numarasını ekle"li yazıları böyle açılır, Word'e alanlarıyla gider
 - **Sayfa sonu** (Ctrl+Enter): sonraki metin yeni sayfadan başlar; liste maddesinde listeyi böler (numara sürer)
-- Tek geri alma geçmişi (metin + resim işlemleri birlikte)
+- Tek geri alma geçmişi (metin + resim işlemleri birlikte). Word'deki gibi Ctrl+Z seçimi geri alınan değişikliğin
+  yerine koyar (üzerine yazılan sözcük yeniden seçili olur, imleç yazımın başladığı yerde durur) ve o yer görünmüyorsa
+  oraya kaydırır; Ctrl+Y değişikliğin sonuna döner. Her komut (Shift+Tab, başlık, punto, seçimin üzerine yapıştırma…)
+  tek adımdır; imleç başka yere götürülüp yazılınca yeni adım başlar.
 - **Simge** (Ω düğmesi): son kullanılanlar, birim ve matematik işaretleri (° ± × ≤ ≥ ‰ µ Ω …), Yunan harfleri, oklar,
   noktalama ve para işaretleri; karakter kodu da yazılabilir. Word'deki gibi metinde kodu yazıp Alt+X (00B0 → °).
+  İkisi de şekil yazısında, üst/alt bilgi kutularında (Sayfa yapısı penceresinde "Ω Simge…") ve Bul/Değiştir'de de
+  çalışır; simge ekleme ve Alt+X ayrı geri alma adımıdır.
 - **Sözcük sayısı**: durum çubuğunda; metin seçiliyken "seçili / toplam" (ör. "7 / 1.250 sözcük"). Sayıya tıklamak
   (ya da Ctrl+Shift+G) sayfa, sözcük, karakter (boşluklu/boşluksuz), paragraf ve satır sayısını gösterir.
 - Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
@@ -154,8 +165,9 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
   satırı alınır, kalanı açılışta bildirilir.
 - Çubuk sekme durağı ve belgeye özgü varsayılan durak aralığı yoktur (varsayılan duraklar her 1,27 cm'de).
   Word'ün "Tam" satır aralığı "En az" olarak alınır.
-- Liste girintisi standarttır (her düzey 1,27 cm); Word listesinin kendi girintisi alınmaz. "%1.%2)" gibi düzeyleri
-  farklı biçimde gösteren numaralar editörde tek biçimle çizilir (Word'e aynen gider). Başlık numaralandırması üç düzeylidir (Word'ün Başlık 4–9'u Başlık 3 olur, numarası metne
+- "A.1." gibi düzeyleri farklı biçimde gösteren numaralar editörde tek biçimle çizilir ("1.1."; Word'e aynen gider).
+  Numaradan sonra sekme yerine boşluk ya da hiçbir şey (Word'ün `suff`'u) yoktur. Word'ün "Liste Girintilerini Ayarla"
+  penceresi yoktur; liste girintisi cetvelden ya da Paragraf penceresinden ayarlanır. Başlık numaralandırması üç düzeylidir (Word'ün Başlık 4–9'u Başlık 3 olur, numarası metne
   yazılır); Word'de ortada yeniden başlatılmış başlık numaraları editöre metin olarak gelir.
 - Eski `.doc` biçimi açılamaz; Word'de ".docx" olarak kaydedin.
 - Köprüler yalnızca web (`http`, `https`) ve e-posta (`mailto`) adresleri içindir; belge içi (yer imi) köprüler yok,

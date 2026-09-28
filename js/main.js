@@ -241,6 +241,7 @@
     f.elements.pnPreset.value = '';
     dlg.returnValue = '';
     dlg.showModal();
+    if (!$('symbolPanel').hidden) app.symbolPanel(dlg); // açık simge paneli pencerede de kullanılabilsin
     const inp = typeof focus === 'string' && f.elements[focus];
     if (inp) {
       inp.focus();
@@ -273,6 +274,11 @@
   });
   // "Vazgeç" gönder düğmesi değil: Enter örtük gönderimde "Uygula"yı seçsin (ilk gönder düğmesi)
   document.querySelectorAll('dialog button[value="cancel"]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close('cancel')));
+  // Simge paneli pencerenin içinde açılır (kalıcı pencerenin dışı tıklanamaz); düğme odağı almaz: simge imlecin
+  // olduğu kutuya girer (text.js: insertSymbol)
+  const hfSym = dlg.querySelector('[data-hf-sym]');
+  hfSym.addEventListener('mousedown', (e) => e.preventDefault());
+  hfSym.addEventListener('click', () => app.symbolPanel(dlg));
   // Hazır sayfa numarası seçeneği ilgili yuvaya yazılır
   dlg.querySelector('[name="pnPreset"]').addEventListener('change', (e) => {
     const [slot, text] = e.target.value.split('|');

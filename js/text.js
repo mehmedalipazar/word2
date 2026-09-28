@@ -75,7 +75,7 @@
     ensureContent();
     app.markDirtyAtSelection();
     app.scheduleLayout();
-    if (!dragMove) app.commit('edit'); // sürükle-bırakla taşımanın silme yarısı ayrı adım olmaz
+    if (!dragMove && !batching) app.commit('edit'); // sürükle-bırakla taşımanın silme yarısı ve komutun içindeki adımlar ayrı adım olmaz
     updateToolbarState();
   }
   // Sürükle-bırakla taşıma Word'deki gibi tek geri alma adımı: kaynağın silinmesi (deleteByDrag) kaydedilmez,
@@ -86,12 +86,25 @@
     dragMove = false;
     app.commit('edit');
   });
+  let batching = false; // true iken girdi olayları geçmişe yazılmaz (toplu biçim tek adım)
+  // Uygulama komutunun içindeki tarayıcı komutları (execCommand) ayrı geri alma adımı yazmaz; komutun sonundaki
+  // afterFormat ya da commit hepsini tek adım kaydeder (Word gibi: her komut tek adımda geri alınır; ör. Shift+Tab'da
+  // Chrome'un outdent'i ve ardından açılan gereksiz span'lar). Şeritler komut süresince düzenden çıkar.
+  function command(fn) {
+    const was = batching;
+    batching = true;
+    try {
+      return app.withoutBands(fn);
+    } finally {
+      batching = was;
+    }
+  }
 
   app.exec = function (cmd, value = null) {
     app.clearSelection && app.clearSelection();
     focusEditor();
     if (/^insert(Ordered|Unordered)List$/.test(cmd) && removeList(cmd === 'insertOrderedList' ? 'OL' : 'UL')) return afterFormat();
-    app.withoutBands(() => document.execCommand(cmd, false, value));
+    command(() => document.execCommand(cmd, false, value));
     if (/List$/.test(cmd)) refreshLists();
     afterFormat();
   };
@@ -165,6 +178,7 @@
       for (const c of [...li.childNodes]) if (!(c.nodeType === 1 && /^(UL|OL)$/.test(c.tagName))) into.appendChild(c);
       if (!into.firstChild) into.appendChild(document.createElement('br'));
       if (li.getAttribute('style')) into.setAttribute('style', li.getAttribute('style'));
+      if (into.tagName !== 'LI') app.clearListIndent(into); // paragrafta anlamsız
       return into;
     };
     for (const it of items) {
@@ -181,6 +195,7 @@
         const src = d === it.depth ? it.list : items.find((x) => x.depth === d && x.list.contains(it.li))?.list || it.list;
         const el = document.createElement(src.tagName.toLowerCase());
         if (src.getAttribute('data-lf')) el.setAttribute('data-lf', src.getAttribute('data-lf')); // liste biçimi
+        app.copyListIndent(src, el); // düzeyin girintisi
         const n = kept.get(src) || 0;
         const start = (parseInt(src.getAttribute('start'), 10) || 1) + n;
         if (src.tagName === 'OL' && start > 1) el.setAttribute('start', start);
@@ -225,7 +240,7 @@
   app.setFontSize = function (pt) {
     focusEditor();
     pendingSize = pt;
-    app.withoutBands(() => {
+    command(() => {
       document.execCommand('styleWithCSS', false, false);
       document.execCommand('fontSize', false, '7');
       document.execCommand('styleWithCSS', false, true);
@@ -237,7 +252,7 @@
   app.setScript = function (cmd) {
     app.clearSelection && app.clearSelection();
     focusEditor();
-    app.withoutBands(() => {
+    command(() => {
       document.execCommand('styleWithCSS', false, false);
       document.execCommand(cmd);
       document.execCommand('styleWithCSS', false, true);
@@ -273,7 +288,7 @@
   }
   app.setBlock = function (tag) {
     focusEditor();
-    app.withoutBands(() => document.execCommand('formatBlock', false, tag));
+    command(() => document.execCommand('formatBlock', false, tag));
     const pins = app.pinSelection();
     selectedBlocks().forEach((b) => {
       dropWholeParagraphFont(b);
@@ -295,8 +310,10 @@
     const blocks = selectedBlocks();
     if (blocks.some((b) => b.tagName === 'LI')) {
       const known = new Set(ed.querySelectorAll('span'));
-      app.withoutBands(() => document.execCommand(dir > 0 ? 'indent' : 'outdent'));
+      command(() => document.execCommand(dir > 0 ? 'indent' : 'outdent'));
       refreshLists();
+      // Düzeyi değişen madde yeni düzeyin girintisini alır (Word gibi: kendi girintisi kalkar)
+      blocks.forEach((b) => b.tagName === 'LI' && b.isConnected && app.clearListIndent(b));
       // Chrome üst düzeye çıkardığı maddenin metnini aynı puntoyla span'a sarıyor; stil sonradan değişince eski
       // punto kalmasın diye bu yeni ve gereksiz span'lar açılır
       const extra = [...ed.querySelectorAll('span[style]')].filter((s) => !known.has(s) && s.style.length === 1 && s.style.fontSize &&
@@ -454,7 +471,7 @@
       c.a.setAttribute('href', href);
       if (text && text !== c.text0) c.a.textContent = text;
     } else if (!c.range.collapsed && (!text || text === c.text0)) {
-      app.withoutBands(() => document.execCommand('createLink', false, href)); // seçili metin biçimiyle köprü olur
+      command(() => document.execCommand('createLink', false, href)); // seçili metin biçimiyle köprü olur
     } else {
       const a = document.createElement('a');
       a.setAttribute('href', href);
@@ -483,7 +500,8 @@
   });
 
   // ---------- Paragraf ayarları (Word'ün Paragraf penceresi) ----------
-  // Girinti: margin-left (Word'ün "Sol"u), margin-right, text-indent (+ ilk satır / − asılı).
+  // Girinti: margin-left (Word'ün "Sol"u), margin-right, text-indent (+ ilk satır / − asılı). Liste maddesinde Sol
+  // metnin, ilk satır / asılı işaretin yeri (core.js: applyListIndent).
   // Aralık: margin-top/bottom (nk) ve satır aralığı (core.js: lineSpacing). Yalnızca değiştirilen alanlar uygulanır.
   const U = SS.units;
   const paraDlg = $('paraDialog');
@@ -495,11 +513,12 @@
   };
   function paraValues(b) {
     const cs = getComputedStyle(b);
-    const ti = parseFloat(cs.textIndent) || 0;
+    const li = b.tagName === 'LI' && app.listIndent(b);
+    const ti = li ? li.first : parseFloat(cs.textIndent) || 0;
     const ls = app.lineSpacing(b);
     const m = ls.px ? null : SS.round(ls.multiple, 2);
     return {
-      left: trNum(SS.round(U.pxToCm(parseFloat(cs.marginLeft) || 0), 2)),
+      left: trNum(SS.round(U.pxToCm(li ? li.left : parseFloat(cs.marginLeft) || 0), 2)),
       right: trNum(SS.round(U.pxToCm(parseFloat(cs.marginRight) || 0), 2)),
       special: ti > 0.5 ? 'first' : ti < -0.5 ? 'hanging' : 'none',
       by: trNum(SS.round(U.pxToCm(Math.abs(ti)), 2)),
@@ -513,11 +532,9 @@
     focusEditor();
     const blocks = selectedBlocks().filter((b) => !b.classList.contains('pb'));
     if (!blocks.length) return;
-    const inList = blocks.some((b) => b.tagName === 'LI');
     paraShown = paraValues(blocks[0]);
     for (const [k, v] of Object.entries(paraShown)) paraForm[k].value = v;
-    for (const k of ['left', 'right', 'special', 'by']) paraForm[k].disabled = inList;
-    $('paraListNote').hidden = !inList;
+    $('paraListNote').hidden = !blocks.some((b) => b.tagName === 'LI');
     paraDlg.returnValue = '';
     paraDlg.showModal();
   };
@@ -535,16 +552,29 @@
     const changed = (...ks) => ks.some((k) => String(f[k].value) !== paraShown[k]);
     focusEditor();
     const blocks = selectedBlocks().filter((b) => !b.classList.contains('pb'));
+    let left = numOf(f.left.value) || 0;
+    const by = numOf(f.by.value) || 0;
+    // Asılı girintide ilk satır kenar boşluğunun dışına taşmasın (Word'de Ctrl+T gibi: sol = asılı)
+    if (f.special.value === 'hanging' && left < by) left = by;
+    const setLeft = changed('left') || (f.special.value === 'hanging' && changed('special', 'by'));
+    const setFirst = changed('special', 'by');
+    const first = f.special.value === 'none' ? 0 : (f.special.value === 'hanging' ? -1 : 1) * U.cmToPx(by);
+    // Liste maddeleri: yeni değerleri aynı olanlar birlikte (bütün maddeleri seçili liste düzeyiyle)
+    const groups = new Map();
+    for (const li of blocks.filter((b) => b.tagName === 'LI')) {
+      const cur = app.listIndent(li);
+      const v = [setLeft ? U.cmToPx(Math.max(0, left)) : cur.left, setFirst ? first : cur.first];
+      const k = v.map((x) => Math.round(x)).join(',');
+      if (!groups.has(k)) groups.set(k, { v, items: [] });
+      groups.get(k).items.push(li);
+    }
+    if (setLeft || setFirst) groups.forEach((g) => app.applyListIndent(g.items, ...g.v));
     for (const b of blocks) {
       if (b.tagName !== 'LI') {
-        let left = numOf(f.left.value) || 0;
-        const by = numOf(f.by.value) || 0;
-        // Asılı girintide ilk satır kenar boşluğunun dışına taşmasın (Word'de Ctrl+T gibi: sol = asılı)
-        if (f.special.value === 'hanging' && left < by) left = by;
-        if (changed('left') || (f.special.value === 'hanging' && changed('special', 'by'))) app.setIndent(b, 'marginLeft', U.cmToPx(Math.max(0, left)));
-        if (changed('right')) app.setIndent(b, 'marginRight', U.cmToPx(Math.max(0, numOf(f.right.value) || 0)));
-        if (changed('special', 'by')) app.setIndent(b, 'textIndent', f.special.value === 'none' ? 0 : (f.special.value === 'hanging' ? -1 : 1) * U.cmToPx(by));
+        if (setLeft) app.setIndent(b, 'marginLeft', U.cmToPx(Math.max(0, left)));
+        if (setFirst) app.setIndent(b, 'textIndent', first);
       }
+      if (changed('right')) app.setIndent(b, 'marginRight', U.cmToPx(Math.max(0, numOf(f.right.value) || 0)));
       if (changed('before') && numOf(f.before.value) !== null) b.style.marginTop = numOf(f.before.value) + 'pt';
       if (changed('after') && numOf(f.after.value) !== null) b.style.marginBottom = numOf(f.after.value) + 'pt';
       if (changed('rule', 'lineVal')) {
@@ -752,7 +782,6 @@
   // paragraf biçimi seçili paragraflara; tek geri alma adımı. Düğme: tek tık bir kez, çift tık sürekli (Esc: bitir).
   let fmt = null;
   let painting = 0; // 0 kapalı, 1 bir kez, 2 sürekli
-  let batching = false; // true iken girdi olayları geçmişe yazılmaz (toplu biçim tek adım)
   const PARA_PROPS = ['textAlign', 'marginLeft', 'marginRight', 'textIndent', 'marginTop', 'marginBottom', 'lineHeight'];
   const fam1 = (f) => f.split(',')[0].replace(/["']/g, '').trim();
   const ptOf = (cs) => Math.round(parseFloat(cs.fontSize) * 1.5) / 2;
@@ -1023,7 +1052,7 @@
     let items = selectedItems();
     if (!items.length) {
       const before = new Set(ed.querySelectorAll('li'));
-      app.withoutBands(() => document.execCommand(ordered ? 'insertOrderedList' : 'insertUnorderedList'));
+      command(() => document.execCommand(ordered ? 'insertOrderedList' : 'insertUnorderedList'));
       app.normalizeBlocks(); // Chrome listeyi paragrafın içine koyabilir
       items = selectedItems();
       if (!items.length) return afterFormat();
@@ -1201,6 +1230,7 @@
 
   ed.addEventListener('input', (e) => {
     bandsOn();
+    if (listExit !== null) dropListIndent(e);
     fixFontTags();
     ensureContent();
     app.markDirtyAtSelection(); // bu sayfaların sayfa sonları (dul/öksüz satır) arka planda yenilenir
@@ -1393,6 +1423,7 @@
 
   // Tarayıcının kendi geri alması yerine bizimki (resim hareketleri de dahil)
   ed.addEventListener('beforeinput', (e) => {
+    app.noteSelection(); // değişiklikten önceki seçim: geri alınınca buraya dönülür (core.js)
     if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
       e.preventDefault();
       e.inputType === 'historyUndo' ? app.undo() : app.redo();
@@ -1405,6 +1436,7 @@
       return;
     }
     if (/^insert(Text|ReplacementText|Paragraph|LineBreak|FromPaste|FromDrop)$/.test(e.inputType)) app.trimParagraphMark();
+    if (e.inputType === 'insertParagraph') noteListExit();
     // Birden çok paragrafa yayılan seçimde yerel düzenleme (silme, üzerine yazma, biçim) şeritsiz yapılır;
     // şeritler 'input' olayında (olmazsa zamanlayıcıyla) geri gelir. Tek paragraf içi yazma etkilenmez.
     const sel = window.getSelection();
@@ -1416,6 +1448,24 @@
     app.els.flow.classList.add('nobands');
     setTimeout(bandsOn, 0);
   });
+  // Boş maddede Enter listeden çıkarır: Chrome maddenin girintisini (css: .editor li, --li-ti) yeni paragrafa satır içi
+  // text-indent olarak kopyalar. Varsayılan değeri normalizeBlocks tanır; Word'den gelen ya da ayarlanmış girinti
+  // değerden tanınamaz (paragrafın kendi asılı girintisi de olabilir): maddeninki not edilir, yalnızca o kaldırılır.
+  let listExit = null;
+  function noteListExit() {
+    const sel = window.getSelection();
+    const u = sel.rangeCount && unitOf(sel.getRangeAt(0).startContainer);
+    listExit = u && u.tagName === 'LI' && !u.textContent.trim() ? parseFloat(getComputedStyle(u).textIndent) || 0 : null;
+  }
+  function dropListIndent(e) {
+    const ti = listExit;
+    listExit = null;
+    const sel = window.getSelection();
+    const b = e.inputType === 'insertParagraph' && sel.rangeCount && unitOf(sel.getRangeAt(0).startContainer);
+    if (!b || b.tagName === 'LI' || !b.style.textIndent || Math.abs(parseFloat(b.style.textIndent) - ti) > 0.01) return;
+    b.style.textIndent = '';
+    if (!b.getAttribute('style')) b.removeAttribute('style');
+  }
   let bandsOff = null;
   function bandsOn() {
     if (!bandsOff) return;
@@ -1429,7 +1479,7 @@
     app.clearSelection && app.clearSelection();
     focusEditor();
     const known = new Set(ed.querySelectorAll('.pb'));
-    app.withoutBands(() => document.execCommand('insertHTML', false, '<div class="pb" contenteditable="false"></div>'));
+    command(() => document.execCommand('insertHTML', false, '<div class="pb" contenteditable="false"></div>'));
     const pb = [...ed.querySelectorAll('.pb')].find((p) => !known.has(p));
     app.normalizeBlocks(); // liste maddesinde: sayfa sonu listenin dışına çıkar, liste bölünür
     const sel = window.getSelection();
@@ -1475,13 +1525,15 @@
     const list = li.parentElement;
     if (list.parentElement !== ed) {
       // alt düzey madde: bir üst düzeye çıkar (Shift+Tab gibi)
-      app.withoutBands(() => document.execCommand('outdent'));
+      command(() => document.execCommand('outdent'));
+      if (li.isConnected) app.clearListIndent(li);
       return;
     }
     const items = [...list.children].filter((c) => c.tagName === 'LI');
     const p = document.createElement('p');
     if (li.getAttribute('style')) p.setAttribute('style', li.getAttribute('style'));
-    p.style.marginLeft = '48px'; // madde metninin yeri (css: .editor li)
+    app.clearListIndent(p);
+    p.style.marginLeft = app.listIndent(li).left + 'px'; // madde metninin yeri (css: .editor li)
     const nested = [...li.children].filter((c) => /^(UL|OL)$/.test(c.tagName));
     for (const c of [...li.childNodes]) if (!nested.includes(c)) p.appendChild(c);
     if (!p.firstChild) p.appendChild(document.createElement('br'));
@@ -1580,7 +1632,8 @@
   // ---------- Simge (Word: Ekle > Simge) ----------
   // Araç çubuğundaki Ω düğmesi simge panelini açar: son kullanılanlar (tarayıcıda saklanır) ve konulara göre
   // simgeler; tık imlecin yerine ekler (panel açık kalır). Karakter kodu da yazılabilir. Word'deki gibi Alt+X
-  // imlecin önündeki onaltılık kodu karaktere (00B0 → °), karakteri koduna çevirir.
+  // imlecin önündeki onaltılık kodu karaktere (00B0 → °), karakteri koduna çevirir. İkisi de şekil yazısında ve
+  // üst/alt bilgi kutularında çalışır (panel Sayfa yapısı penceresinden de açılır).
   const SYMBOLS = [
     ['Birimler ve matematik', '°±×÷≈≠≤≥∞√∑∆∂∫‰%¹²³¼½¾µΩ′″∠⊥∥∈∩∪'],
     ['Yunan harfleri', 'αβγδεζηθικλμνξπρστυφχψωΓΔΘΛΞΠΣΦΨ'],
@@ -1601,12 +1654,18 @@
       return [];
     }
   }
+  // Son kullanılanlar başta, satırlar varsayılanlarla dolu kalır (Word gibi)
   function fillRecent() {
     const list = recentSymbols();
-    $('symRecent').replaceChildren(...(list.length ? list : ['°', '±', 'µ', '‰', '×', '≤', '≥', 'Ω']).map(symButton));
+    const more = ['°', '±', 'µ', '‰', '×', '≤', '≥', 'Ω'].filter((c) => !list.includes(c));
+    $('symRecent').replaceChildren(...[...list, ...more].slice(0, 20).map(symButton));
   }
-  app.symbolPanel = function () {
-    if (!symPanel.hidden) return void (symPanel.hidden = true);
+  // host: panel kalıcı bir pencerenin içinden açılıyorsa o pencere (Sayfa yapısı: üst/alt bilgi). Kalıcı pencere
+  // açıkken dışı tıklanamaz: panel pencereye taşınır, pencere kapanınca yerine döner.
+  const symHome = symPanel.parentNode;
+  app.symbolPanel = function (host) {
+    const where = host || symHome;
+    if (!symPanel.hidden && symPanel.parentNode === where) return void (symPanel.hidden = true);
     if (!$('symGroups').childElementCount)
       for (const [name, chars] of SYMBOLS) {
         const grid = document.createElement('div');
@@ -1615,15 +1674,89 @@
         $('symGroups').append(Object.assign(document.createElement('div'), { className: 'sym-sec', textContent: name }), grid);
       }
     fillRecent();
-    const tb = document.querySelector('.toolbars').getBoundingClientRect();
-    symPanel.style.top = tb.bottom + 8 + 'px';
+    if (symPanel.parentNode !== where) {
+      const reopen = !symPanel.hidden; // ana ekranda açıktı: pencere kapanınca yine açık
+      where.appendChild(symPanel);
+      if (host)
+        host.addEventListener('close', () => {
+          symHome.appendChild(symPanel);
+          symPanel.hidden = !reopen;
+          app.placeSymbolPanel();
+        }, { once: true });
+    }
     symPanel.hidden = false;
+    app.placeSymbolPanel();
   };
+  // Araç çubuğunun altında; Bul ve Değiştir paneli açıksa onun altında (ikisi de sağ üstte)
+  app.placeSymbolPanel = function () {
+    if (symPanel.hidden) return;
+    const find = $('findPanel');
+    const above = !find.hidden && symPanel.parentNode === symHome ? find : document.querySelector('.toolbars');
+    const top = above.getBoundingClientRect().bottom + 8;
+    symPanel.style.top = top + 'px';
+    symPanel.style.maxHeight = Math.max(160, window.innerHeight - top - 16) + 'px';
+  };
+  // Simgenin gideceği yer: odaktaki metin alanı (düzenlenen şekil yazısı, pencere ya da paneldeki metin kutusu:
+  // üst/alt bilgi, Bul/Değiştir) ya da ana metin. Panelin düğmeleri odağı almaz. Karakter kodu kutusundan
+  // eklenirken odak o kutudadır: son metin alanı ve içindeki imleç kullanılır.
+  const capEditing = (el) => (el && el.isContentEditable && el.classList.contains('cap-text') ? el : null);
+  const textField = (el) =>
+    el && el !== symCode && !el.closest('.toolbars, .symbols') &&
+    ((el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'search')) || el.tagName === 'TEXTAREA') ? el : null;
+  let lastField = null; // { input } | { cap: resim kimliği, off: yazıdaki imleç }
+  // Yakalama evresinde: şekil yazısının kendi blur işleyicisi düzenlemeyi bitirmeden önce
+  document.addEventListener('blur', (e) => {
+    const t = e.target;
+    if (!t || t.nodeType !== 1) return;
+    if (t === ed) lastField = null;
+    else if (textField(t)) lastField = { input: t };
+    else if (capEditing(t)) {
+      const sel = window.getSelection();
+      const r = sel.rangeCount && sel.getRangeAt(0);
+      let off = t.textContent.length;
+      if (r && t.contains(r.startContainer)) {
+        const pre = document.createRange();
+        pre.selectNodeContents(t);
+        pre.setEnd(r.startContainer, r.startOffset);
+        off = pre.toString().length;
+      }
+      lastField = { cap: t.closest('.cap').dataset.id, off };
+    }
+  }, true);
+  symPanel.addEventListener('mousedown', (e) => e.target.closest('button') && e.preventDefault());
+  function symbolTarget() {
+    const a = document.activeElement;
+    if (capEditing(a) || textField(a)) return a;
+    const f = lastField;
+    if (a !== symCode || !f) return null;
+    if (f.input) {
+      if (!f.input.isConnected || !f.input.offsetParent) return null; // kapanmış pencerede
+      f.input.focus();
+      return f.input;
+    }
+    if (!app.getImage(f.cap)) return null;
+    app.editCaption(f.cap); // yazıyı yeniden düzenlemeye aç, imleç eski yerine
+    const t = app.els.doc.querySelector(`.cap[data-id="${f.cap}"] .cap-text`);
+    const n = t && t.firstChild;
+    if (n && n.nodeType === 3) {
+      const r = document.createRange();
+      r.setStart(n, Math.min(f.off, n.length));
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    return capEditing(t);
+  }
   app.insertSymbol = function (c) {
-    app.clearSelection && app.clearSelection();
-    focusEditor();
-    app.trimParagraphMark();
-    document.execCommand('insertText', false, c);
+    const field = symbolTarget();
+    if (field) document.execCommand('insertText', false, c); // şekil yazısı ya da metin kutusu: kendi geri alması
+    else {
+      app.clearSelection && app.clearSelection();
+      focusEditor();
+      app.trimParagraphMark();
+      command(() => document.execCommand('insertText', false, c));
+      app.commit('edit'); // Word gibi: simge ekleme, önündeki yazımdan ayrı geri alınır
+    }
     const list = [c, ...recentSymbols().filter((x) => x !== c)].slice(0, 16);
     try {
       localStorage.setItem(RECENT_KEY, JSON.stringify(list));
@@ -1650,38 +1783,59 @@
     if (e.key === 'Enter') {
       e.preventDefault();
       symPanel.querySelector('[data-sym="code"]').click();
-    } else if (e.key === 'Escape') symPanel.hidden = true;
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); // panel Sayfa yapısı penceresindeyse pencere açık kalsın
+      symPanel.hidden = true;
+    }
   });
-  // Alt+X: imlecin önündeki onaltılık kod (U+ olabilir) karaktere, kod yoksa önceki karakter koduna çevrilir
-  function unicodeToggle() {
-    const sel = window.getSelection();
-    if (!sel.rangeCount || !sel.isCollapsed) return false;
-    const r = sel.getRangeAt(0);
-    const t = r.startContainer;
-    if (t.nodeType !== 3 || !ed.contains(t)) return false;
-    const before = t.nodeValue.slice(0, r.startOffset);
+  // Alt+X: imlecin önündeki onaltılık kod (U+ olabilir) karaktere, kod yoksa önceki karakter koduna çevrilir.
+  // before: imlecin önündeki metin → { n: silinecek UTF-16 uzunluğu, text } ya da null
+  function codeSwap(before) {
     // Kod: "U+" ile yazılmışsa tamamı; 5–6 haneli geçerli bir BMP dışı kod; yoksa son 4 hane ("20" + "00b0" → "20°")
     const run = /(U\+)?([0-9a-fA-F]{2,})$/.exec(before);
     let hex = run && run[2];
     if (hex && !run[1] && hex.length > 4) hex = /^[0-9a-f]{5,6}$/i.test(hex) && parseInt(hex, 16) >= 0x10000 && codeChar(hex) ? hex : hex.slice(-4);
     const c = hex && hex.length <= 6 && codeChar(hex);
-    const range = document.createRange();
-    let text;
-    if (c) {
-      range.setStart(t, r.startOffset - hex.length - (run[1] ? 2 : 0));
-      text = c;
-    } else {
-      const last = [...before].pop();
-      if (!last) return false;
-      range.setStart(t, r.startOffset - last.length);
-      text = hexOfChar(last);
+    if (c) return { n: hex.length + (run[1] ? 2 : 0), text: c };
+    const last = [...before].pop();
+    return last ? { n: last.length, text: hexOfChar(last) } : null;
+  }
+  // field: şekil yazısı ya da metin kutusu (yoksa ana metin)
+  function unicodeToggle(field) {
+    if (field && !field.isContentEditable) {
+      const a = field.selectionStart;
+      if (a == null || a !== field.selectionEnd) return false;
+      const sw = codeSwap(field.value.slice(0, a));
+      if (!sw) return false;
+      field.setSelectionRange(a - sw.n, a);
+      document.execCommand('insertText', false, sw.text); // kutunun kendi geri alması
+      return true;
     }
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0);
+    const t = r.startContainer;
+    if (t.nodeType !== 3 || !(field || ed).contains(t)) return false;
+    const sw = codeSwap(t.nodeValue.slice(0, r.startOffset));
+    if (!sw) return false;
+    const range = document.createRange();
+    range.setStart(t, r.startOffset - sw.n);
     range.setEnd(t, r.startOffset);
     sel.removeAllRanges();
     sel.addRange(range);
-    document.execCommand('insertText', false, text);
+    if (field) document.execCommand('insertText', false, sw.text);
+    else {
+      command(() => document.execCommand('insertText', false, sw.text));
+      app.commit('edit'); // Word gibi: dönüşüm, önündeki yazımdan ayrı geri alınır
+    }
     return true;
   }
+  // Şekil yazısında ve metin kutularında da (üst/alt bilgi, Bul/Değiştir)
+  document.addEventListener('keydown', (e) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.code !== 'KeyX') return;
+    const f = capEditing(document.activeElement) || textField(document.activeElement);
+    if (f && unicodeToggle(f)) e.preventDefault();
+  });
 
   // ---------- Yapıştırma: Word/web içeriğini sadeleştir ----------
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -1823,6 +1977,8 @@
       const wordLen = (v) => /^-?[\d.]+(pt|cm|mm|in)$/.test(v || '');
       const stops = wordTabStops(style); // Word'ün özel sekme durakları
       if (stops) el.dataset.tabs = stops;
+      // Maddenin girintisi (Word: metnin yeri margin-left, işaretinki text-indent): flatten listeye ya da maddeye yazar
+      if (listy && wordLen(st.marginLeft)) el.dataset.wordInd = [st.marginLeft, wordLen(st.textIndent) ? st.textIndent : '0pt'].map(wordPx).join(',');
       if (!listy && el.tagName !== 'LI') {
         if (wordLen(st.textIndent)) el.style.textIndent = st.textIndent;
         if (wordLen(st.marginLeft) && parseFloat(st.marginLeft) > 0) el.style.marginLeft = st.marginLeft;
@@ -1863,6 +2019,7 @@
     const L = document.createElement(list.tagName.toLowerCase());
     if (list.getAttribute('start')) L.setAttribute('start', list.getAttribute('start'));
     if (list.getAttribute('data-lf')) L.setAttribute('data-lf', list.getAttribute('data-lf')); // liste biçimi (core.js doğrular)
+    app.copyListIndent(list, L); // düzeyin girintisi
     for (const n of [...list.childNodes]) {
       if (n.nodeType === 1 && n.tagName === 'LI') {
         const li = document.createElement('li');
@@ -1889,9 +2046,14 @@
     return L;
   }
 
+  const wordPx = (v) => {
+    const n = parseFloat(v);
+    return /cm$/.test(v) ? U.cmToPx(n) : /mm$/.test(v) ? U.cmToPx(n / 10) : /in$/.test(v) ? n * 96 : (n * 4) / 3;
+  };
   function flatten(root, out) {
     let cur = null;
     let run = null; // art arda gelen tek başına maddeler: { root, stack: [düzey 1 listesi, düzey 2 listesi…] }
+    const indented = new WeakSet(); // girintisini ilk maddesinden almış listeler
     const loose = (n) => {
       if (!cur && n.nodeType === 3 && /^ *$/.test(n.nodeValue)) return; // bloklar arası kaynak boşluğu
       if (!cur) cur = out.appendChild(document.createElement('p'));
@@ -1911,6 +2073,7 @@
         const level = SS.clamp(+n.dataset.wordLevel || 1, 1, 9);
         const start = +n.dataset.wordStart || 0;
         const wf = app.parseLF(n.dataset.wordFmt)[0];
+        const wi = n.dataset.wordInd && n.dataset.wordInd.split(',').map(Number);
         const tmp = document.createElement(type);
         tmp.appendChild(n);
         const li = fixList(tmp).firstElementChild;
@@ -1937,6 +2100,11 @@
           if (st.length === 1) [run.root, run.levels] = [L, []];
         }
         L.appendChild(li);
+        // Girinti (core.js: setListIndent): listenin ilk maddesininki bütün düzeyin, farklı olan madde kendisinin
+        if (wi && !indented.has(L)) {
+          indented.add(L);
+          app.setListIndent(L, ...wi);
+        } else if (wi) app.setListIndent(li, ...wi);
         // Word'deki biçim (a), I., 1.1., –…) listenin data-lf'sine (core.js); varsayılan düzey (1. a. i. / • o ▪) yazılmaz
         if (wf && !run.levels[level - 1]) {
           run.levels[level - 1] = wf;
@@ -1988,7 +2156,8 @@
     convertChildren(doc.body, tmp, ctx);
     const out = document.createElement('div');
     flatten(tmp, out);
-    out.querySelectorAll('[data-word-list],[data-word-level],[data-word-start]').forEach((e) => {
+    out.querySelectorAll('[data-word-list],[data-word-level],[data-word-start],[data-word-ind]').forEach((e) => {
+      e.removeAttribute('data-word-ind');
       e.removeAttribute('data-word-list');
       e.removeAttribute('data-word-level');
       e.removeAttribute('data-word-start');
@@ -1998,7 +2167,7 @@
 
   function insertPlain(text) {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
-    app.withoutBands(() => {
+    command(() => {
       if (lines.length === 1) document.execCommand('insertText', false, text);
       else document.execCommand('insertHTML', false, lines.map((l) => `<p>${esc(l) || '<br>'}</p>`).join(''));
     });
@@ -2023,7 +2192,7 @@
 
   app.insertSanitized = function (res) {
     app.trimParagraphMark(); // seçim sonraki paragrafın başında bitiyorsa o paragraf korunur
-    if (res.text || /<br>/.test(res.html)) app.withoutBands(() => document.execCommand('insertHTML', false, res.html));
+    if (res.text || /<br>/.test(res.html)) command(() => document.execCommand('insertHTML', false, res.html));
     if (res.images.length) app.insertImageURLs && app.insertImageURLs(res.images);
     if (res.skipped) SS.toast('Word\'den gelen görseller metinle yapıştırılamaz; resimleri sürükleyip bırakın ya da tek tek yapıştırın.', 4500);
     ensureContent();
@@ -2214,10 +2383,11 @@
     const box = cleanInternal(root, document.createElement('div'));
     box.querySelectorAll('ul, ol').forEach((l) => !l.querySelector('li') && l.remove()); // eski panolardaki boş kabuk
     const sel = window.getSelection();
-    if (sel.rangeCount && !sel.isCollapsed) app.deleteSelection(); // seçimin yerine
-    if (!box.querySelector('p,h1,h2,h3,ul,ol,li,.pb')) insertInline(box);
-    else if (!(root.getAttribute(CLIP_ATTR) === 'paragraf' && insertParagraphs(box)))
-      app.withoutBands(() => document.execCommand('insertHTML', false, box.innerHTML));
+    command(() => {
+      if (sel.rangeCount && !sel.isCollapsed) app.deleteSelection(); // seçimin yerine (silme ve yapıştırma tek adım)
+      if (!box.querySelector('p,h1,h2,h3,ul,ol,li,.pb')) insertInline(box);
+      else if (!(root.getAttribute(CLIP_ATTR) === 'paragraf' && insertParagraphs(box))) document.execCommand('insertHTML', false, box.innerHTML);
+    });
     ensureContent();
     afterFormat();
     revealCaretSoon();

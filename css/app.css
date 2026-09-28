@@ -126,7 +126,6 @@ select {
 .rm.left { bottom: -3px; height: 5px; }
 .rm.right { bottom: -3px; height: 8px; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .ruler-page.off .rm { display: none; }
-.ruler-page.list .rm { opacity: .35; cursor: default; }
 /* Sekme durakları (ruler.js): └ sola, ┴ ortaya, ┘ sağa, ┴• ondalık; soldaki kutu konacak durağın türü */
 .rt { position: absolute; bottom: 1px; width: 8px; height: 7px; margin-left: -1px; border: 0 solid #111; cursor: ew-resize; }
 .rt.l { border-left-width: 2px; border-bottom-width: 2px; }
@@ -222,14 +221,26 @@ select {
 .editor h1 { font-size: 18pt; margin: 12pt 0 6pt; }
 .editor h2 { font-size: 14pt; margin: 10pt 0 5pt; }
 .editor h3 { font-size: 12pt; margin: 8pt 0 4pt; }
-/* Listeler Word'ün varsayılan asılı girintisiyle: işaret 0,635 cm'de, metin ve taşan satırlar 1,27 cm'de,
-   her alt düzey 1,27 cm içeride. İşaret içeride (inside) kalır: dışarıdaki işareti şerit float'larının margin
-   alanı kaybettiriyor. İşaretin sonundaki sekme metni 1,27 cm durağına hizalar (tab-size). */
-.editor ul, .editor ol { margin: 0 0 8pt; padding-left: 0; }
+/* Liste girintisi Word'deki gibi sol kenardan ölçülür: --li-pad maddenin metninin (ve taşan satırların) yeri,
+   --li-ti işaretin ona göre yeri (eksi: asılı). Varsayılan Word'ünkü: işaret 0,635 cm'de, metin 1,27 cm'de, her alt
+   düzey 1,27 cm içeride. Word'den gelen ya da cetvelle / Paragraf penceresiyle verilen değer listenin (bütün düzey)
+   ya da maddenin satır içi stilindedir (core.js: setListIndent). İç listeler de kenardan başlar (maddenin içindeki
+   liste maddenin girintisini geri alır): değerler iç içe toplanmaz. İşaret içeride (inside) kalır: dışarıdaki işareti
+   şerit float'larının margin alanı kaybettiriyor. İşaretin sonundaki sekme metni girinti durağına hizalar; işaret
+   asılı girintiden uzunsa sonraki 1,27 cm durağına (tab-size). */
+.editor ul, .editor ol { margin: 0 0 8pt; padding-left: 0; --li-pad: 1.27cm; --li-ti: -0.6351cm; }
+.editor :is(ul, ol) :is(ul, ol) { --li-pad: 2.54cm; }
+.editor :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 3.81cm; }
+.editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 5.08cm; }
+.editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 6.35cm; }
+.editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 7.62cm; }
+.editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 8.89cm; }
+.editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 10.16cm; }
+.editor :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) :is(ul, ol) { --li-pad: 11.43cm; }
 /* 0,6351 cm: Chrome bu kalıtılan girintiyi listeden taşınan metne kopyalar; core.js: normalizeBlocks bu değerden tanıyıp siler */
-.editor li { list-style-position: inside; margin: 0; padding-left: 1.27cm; text-indent: -0.6351cm; }
-.editor li > ul, .editor li > ol { margin: 0; }
-.editor ul > ul, .editor ul > ol, .editor ol > ul, .editor ol > ol { margin: 0; padding-left: 1.27cm; } /* Chrome'un girinti biçimi */
+.editor li { list-style-position: inside; margin: 0; padding-left: var(--li-pad); text-indent: var(--li-ti); --li-in: var(--li-pad); }
+.editor li > ul, .editor li > ol { margin: 0 0 0 calc(0px - var(--li-in)); }
+.editor ul > ul, .editor ul > ol, .editor ol > ul, .editor ol > ol { margin: 0; } /* Chrome'un girinti biçimi */
 .editor ul > li::marker { content: "\2022\9"; }
 .editor :is(ul, ol) ul > li::marker { content: "o\9"; }
 .editor :is(ul, ol) :is(ul, ol) ul > li::marker { content: "\25AA\9"; }
@@ -357,6 +368,7 @@ select {
 .dialog .hf-set { grid-template-columns: auto 1fr 1fr 1fr; align-items: center; }
 .dialog .hf-set input:not([type]) { height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; min-width: 0; }
 .dialog .hf-lbl { font-size: 12px; color: var(--muted); }
+.dialog .hf-tools { display: flex; justify-content: flex-end; margin-top: -2px; }
 .dialog .wide { grid-column: 1 / -1; }
 .dialog .hint-text { margin: 0; font-size: 12px; color: var(--muted); }
 .dialog .actions .grow { flex: 1; }

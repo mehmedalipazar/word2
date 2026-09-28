@@ -481,6 +481,60 @@
     b.style[prop] = Math.abs(px - base) > 0.5 ? px + 'px' : '';
     if (!b.getAttribute('style')) b.removeAttribute('style');
   };
+
+  // ---------- Liste girintisi (css: .editor li) ----------
+  // Maddenin metninin yeri (left, sol kenardan) ve işaretin ona göre yeri (first; eksi: asılı), px. Düzeyin
+  // varsayılanı Word'ünkü (1,27 cm × düzey, 0,635 cm asılı); listenin (bütün düzey) ya da maddenin satır içi
+  // --li-pad / --li-ti'si onu değiştirir. Değerler twip'e yuvarlanmış nk olarak yazılır (Word'e aynen gider).
+  const LI_STEP = U.cmToPx(1.27);
+  const LI_HANG = U.cmToPx(0.6351);
+  const LI_PROPS = ['--li-pad', '--li-ti'];
+  const listDepth = (list) => {
+    let d = 0;
+    for (let p = list.parentElement; p && p !== els.editor; p = p.parentElement) if (p.tagName === 'UL' || p.tagName === 'OL') d++;
+    return d;
+  };
+  const lenPx = (v) => {
+    const n = parseFloat(v);
+    if (!isFinite(n)) return null;
+    return /cm\s*$/.test(v) ? U.cmToPx(n) : /pt\s*$/.test(v) ? (n * 4) / 3 : n;
+  };
+  const levelDefault = (list) => ({ left: LI_STEP * (listDepth(list) + 1), first: -LI_HANG });
+  // Listenin (düzeyin) girintisi: kendi değeri ya da derinliğinin varsayılanı
+  function levelIndent(list) {
+    const d = levelDefault(list);
+    const own = (k) => lenPx(list.style.getPropertyValue(k));
+    return { left: own(LI_PROPS[0]) ?? d.left, first: own(LI_PROPS[1]) ?? d.first };
+  }
+  app.listIndent = (li) => {
+    const cs = getComputedStyle(li);
+    return { left: parseFloat(cs.paddingLeft) || 0, first: parseFloat(cs.textIndent) || 0 };
+  };
+  // el: liste (düzeyin bütün maddeleri) ya da madde. Listeninki varsayılanla, maddeninki listeninkiyle aynıysa yazılmaz.
+  app.setListIndent = function (el, left, first) {
+    const base = el.tagName === 'LI' ? levelIndent(el.parentElement) : levelDefault(el);
+    const pt = (px) => +(Math.round(px * 15) / 20).toFixed(2) + 'pt';
+    [[LI_PROPS[0], left, base.left], [LI_PROPS[1], first, base.first]].forEach(([k, v, b]) =>
+      Math.abs(v - b) > 0.5 ? el.style.setProperty(k, pt(v)) : el.style.removeProperty(k));
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+  };
+  app.clearListIndent = (el) => {
+    LI_PROPS.forEach((k) => el.style.removeProperty(k));
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+  };
+  // Seçili maddelere (cetvel, Paragraf penceresi): bir listenin bütün maddeleri seçiliyse değer listeye (düzeye),
+  // yoksa yalnızca seçili maddelere yazılır (Word gibi)
+  app.applyListIndent = function (items, left, first) {
+    for (const L of new Set(items.map((li) => li.parentElement))) {
+      const own = [...L.children].filter((c) => c.tagName === 'LI');
+      if (own.every((li) => items.includes(li))) {
+        own.forEach(app.clearListIndent);
+        app.setListIndent(L, left, first);
+      } else own.filter((li) => items.includes(li)).forEach((li) => app.setListIndent(li, left, first));
+    }
+  };
+  // Yeni kurulan liste eskisinin düzey girintisini alır (liste bölünürken, yapıştırmada)
+  app.copyListIndent = (from, to) => LI_PROPS.forEach((k) => from.style.getPropertyValue(k) && to.style.setProperty(k, from.style.getPropertyValue(k)));
   app.applyStyles();
   // Stil değişikliği: bütün sayfalar yeniden dizilir, tek geri alma adımı
   app.setStyles = function (styles) {
@@ -1390,56 +1444,164 @@
   };
 
   // ---------- Metin seçimi: kaydet / geri yükle (geri alma için) ----------
-  const nodeLen = (n) => (n.nodeType === 3 ? n.length : n.childNodes.length);
+  // Konumlar, belge HTML'den yeniden kurulduğundaki (geri alma) düğümlere göre sayılır: bitişik metin düğümleri
+  // tek düğüm, boş metin düğümleri yok sayılır (komutlar canlı belgede metni birkaç düğüme böler).
+  // Nokta: { path: editörden öğeye sıra numaraları, off: metinde karakter / öğede alt düğüm sırası }
+  const isText = (n) => n.nodeType === 3;
+  // parent.childNodes[0..end) yeniden kurulunca kaç düğüm eder
+  function normIndex(parent, end) {
+    let k = 0;
+    let run = false;
+    for (let i = 0; i < end; i++) {
+      const c = parent.childNodes[i];
+      if (!isText(c)) {
+        k++;
+        run = false;
+      } else if (c.length && !run) {
+        k++;
+        run = true;
+      }
+    }
+    return k;
+  }
+  // Yeniden kurulmuş sayımla k. alt düğüm (metin dizisinin ilk dolu düğümü)
+  function childAt(parent, k) {
+    let run = false;
+    for (const c of parent.childNodes) {
+      if (!isText(c)) {
+        run = false;
+        if (!k--) return c;
+      } else if (c.length && !run) {
+        run = true;
+        if (!k--) return c;
+      }
+    }
+    return null;
+  }
   function pathOf(node) {
     const path = [];
     while (node && node !== els.editor) {
       const p = node.parentNode;
       if (!p) return null;
-      path.unshift(Array.prototype.indexOf.call(p.childNodes, node));
+      path.unshift(normIndex(p, Array.prototype.indexOf.call(p.childNodes, node)));
       node = p;
     }
     return node === els.editor ? path : null;
   }
-  function nodeAt(path) {
+  function pointOf(node, off) {
+    const parent = node.parentNode;
+    if (isText(node) && parent) {
+      let first = node;
+      while (first.previousSibling && isText(first.previousSibling)) {
+        first = first.previousSibling;
+        off += first.length;
+      }
+      const at = Array.prototype.indexOf.call(parent.childNodes, first);
+      let len = off;
+      for (let n = node; !len && n && isText(n); n = n.nextSibling) len += n.length;
+      if (!len) return elementPoint(parent, at); // bütün dizi boş: yeniden kurulunca yok
+      const p = pathOf(parent);
+      return p && { path: [...p, normIndex(parent, at)], off };
+    }
+    return elementPoint(node, off);
+  }
+  function elementPoint(el, i) {
+    const prev = el.childNodes[i - 1];
+    const next = el.childNodes[i];
+    if (prev && next && isText(prev) && isText(next)) return pointOf(prev, prev.length); // birleşecek iki düğümün arası
+    const p = pathOf(el);
+    return p && { path: p, off: normIndex(el, i) };
+  }
+  function nodeAt(pt) {
     let n = els.editor;
-    for (const i of path) {
-      n = n.childNodes[i];
+    for (const k of pt.path) {
+      n = childAt(n, k);
       if (!n) return null;
     }
-    return n;
+    let off = pt.off;
+    if (isText(n)) {
+      while (off > n.length && n.nextSibling && isText(n.nextSibling)) {
+        off -= n.length;
+        n = n.nextSibling;
+      }
+      return [n, Math.min(off, n.length)];
+    }
+    const c = childAt(n, off);
+    return [n, c ? Array.prototype.indexOf.call(n.childNodes, c) : n.childNodes.length];
   }
-  function saveSel() {
+  function saveSel(range) {
     const sel = window.getSelection();
-    if (!sel.rangeCount) return null;
-    const r = sel.getRangeAt(0);
-    const a = pathOf(r.startContainer);
-    const b = pathOf(r.endContainer);
-    return a && b ? { a, ao: r.startOffset, b, bo: r.endOffset } : null;
+    const r = range || (sel.rangeCount && sel.getRangeAt(0));
+    if (!r) return null;
+    const a = pointOf(r.startContainer, r.startOffset);
+    const b = a && pointOf(r.endContainer, r.endOffset);
+    return b ? { a, b } : null;
   }
+  const samePoint = (x, y) => x.off === y.off && x.path.length === y.path.length && x.path.every((v, i) => v === y.path[i]);
+  const sameSel = (x, y) => !!x && !!y && samePoint(x.a, y.a) && samePoint(x.b, y.b);
   function restoreSel(s) {
-    if (!s) return;
+    if (!s) return false;
     const a = nodeAt(s.a);
     const b = nodeAt(s.b);
-    if (!a || !b) return;
+    if (!a || !b) return false;
     try {
       const r = document.createRange();
-      r.setStart(a, Math.min(s.ao, nodeLen(a)));
-      r.setEnd(b, Math.min(s.bo, nodeLen(b)));
+      r.setStart(a[0], a[1]);
+      r.setEnd(b[0], b[1]);
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(r);
-    } catch (_) { /* yol artık geçersiz */ }
+      return true;
+    } catch (_) {
+      return false; // yol artık geçersiz
+    }
+  }
+  // Seçim görünümün dışındaysa görünür yere kaydır (geri alınan değişiklik görünsün)
+  function revealSel() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !els.editor.contains(sel.anchorNode)) return;
+    const r = sel.getRangeAt(0);
+    const host = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+    const rc = r.getClientRects()[0] || host.getBoundingClientRect();
+    const ws = els.workspace;
+    const wr = ws.getBoundingClientRect();
+    if (rc.top < wr.top + 40 || rc.bottom > wr.bottom - 40) ws.scrollTop += rc.top - (wr.top + wr.height / 3);
   }
 
   // ---------- Geri alma / yineleme (metin + resimler birlikte) ----------
+  // Her adım değişiklikten sonraki (sel) ve önceki (before) seçimi saklar. Geri alınınca seçim değişiklikten
+  // önceki yerine konur (Word gibi: üzerine yazılan sözcük yeniden seçili olur, imleç yazımın başladığı yerde
+  // durur), yinelenince sonrasındaki yerine; o yer görünümün dışındaysa oraya kaydırılır.
   const hist = { stack: [], index: -1, kind: null, time: 0 };
+  // Değişiklikten önceki seçim: son kayıttan beri editörde görülen son seçim. Belgenin metni ya da yapısı kayıt
+  // dışında değişmişse (ör. sürükle-bırakla taşımanın silme yarısı) yeni seçim alınmaz: yol kayıtlı HTML'e uymaz.
+  // Düzen yalnızca öznitelikleri değiştirir (sekme genişliği, sayfa sonu yüksekliği): onlar izlenmez.
+  let idleSel = null;
+  let touched = false;
+  const watch = new MutationObserver(() => (touched = true));
+  watch.observe(els.editor, { childList: true, characterData: true, subtree: true });
+  function settled(sel) {
+    watch.takeRecords();
+    touched = false;
+    idleSel = sel || null;
+  }
+  // range: seçim yerine bu aralık (ör. Bul ve Değiştir'de değiştirilecek sonuç)
+  app.noteSelection = function (range) {
+    if (watch.takeRecords().length) touched = true;
+    if (touched) return;
+    const s = saveSel(range);
+    if (s) idleSel = s;
+  };
+  document.addEventListener('selectionchange', () => app.noteSelection());
+  // Seçimi değiştiren tuşun hemen ardından gelen komutta (Home, Tab) selectionchange henüz gelmemiş olabilir
+  document.addEventListener('keydown', () => app.noteSelection(), true);
   function snapshot() {
     return {
       html: els.editor.innerHTML,
       images: JSON.stringify(state.images),
       meta: JSON.stringify({ page: state.page, hf: state.hf, minPages: state.minPages, styles: state.styles }),
       sel: saveSel(),
+      before: null,
       keep: keep.slice(), // sayfalama sonucu: geri alınınca düzen hemen doğru kurulsun
     };
   }
@@ -1452,30 +1614,39 @@
     imgSig.clear();
   }
 
-  // kind: 'typing' | 'deleting' | 'nudge' ardışık olanlar tek adımda birleşir; 'edit' birleşmez
+  // kind: 'typing' | 'deleting' | 'nudge' ardışık olanlar tek adımda birleşir; 'edit' birleşmez. İmleç
+  // başka yere götürülüp yazılınca yeni adım başlar (Word gibi: her yazım yeri ayrı geri alınır).
   app.commit = function (kind = 'edit') {
     const s = snapshot();
     const now = Date.now();
     const top = hist.stack[hist.index];
     if (top && top.html === s.html && top.images === s.images && top.meta === s.meta) {
       top.sel = s.sel;
+      watch.takeRecords();
+      touched = false;
       return;
     }
+    s.before = idleSel || (top && top.sel) || null;
     const merge =
-      top && kind !== 'edit' && kind === hist.kind && now - hist.time < 1500 && hist.index === hist.stack.length - 1;
-    if (merge) hist.stack[hist.index] = s;
-    else {
+      top && kind !== 'edit' && kind === hist.kind && now - hist.time < 1500 && hist.index === hist.stack.length - 1 &&
+      (!idleSel || sameSel(idleSel, top.sel));
+    if (merge) {
+      s.before = top.before;
+      hist.stack[hist.index] = s;
+    } else {
       hist.stack.length = hist.index + 1;
       hist.stack.push(s);
       if (hist.stack.length > 300) hist.stack.shift();
       hist.index = hist.stack.length - 1;
     }
+    settled();
     hist.kind = kind;
     hist.time = now;
     app.onChange && app.onChange();
   };
 
-  function restore(s) {
+  // sel: konulacak seçim; reveal: metin değiştiyse seçim görünür yere kaydırılır
+  function restore(s, sel, reveal) {
     hist.kind = null;
     els.editor.innerHTML = s.html;
     app.normalizeBlocks(true);
@@ -1486,16 +1657,24 @@
     resetPagination(s.keep);
     app.relayoutAll();
     app.markDirty();
-    restoreSel(s.sel);
+    if (!restoreSel(sel) && sel !== s.sel) restoreSel(s.sel);
+    settled(saveSel());
+    if (reveal) revealSel();
     app.updateCtxBar && app.updateCtxBar();
     app.onChange && app.onChange();
   }
 
   app.undo = () => {
-    if (hist.index > 0) restore(hist.stack[--hist.index]);
+    if (hist.index <= 0) return;
+    const undone = hist.stack[hist.index--];
+    const s = hist.stack[hist.index];
+    restore(s, undone.before || s.sel, undone.html !== s.html);
   };
   app.redo = () => {
-    if (hist.index < hist.stack.length - 1) restore(hist.stack[++hist.index]);
+    if (hist.index >= hist.stack.length - 1) return;
+    const prev = hist.stack[hist.index++];
+    const s = hist.stack[hist.index];
+    restore(s, s.sel, s.html !== prev.html);
   };
   app.canUndo = () => hist.index > 0;
   app.canRedo = () => hist.index < hist.stack.length - 1;

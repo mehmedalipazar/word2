@@ -146,6 +146,7 @@
 
   function replaceOne() {
     if (!matches[current]) return go(1);
+    app.noteSelection(matches[current].range); // geri alınınca değiştirilen sonuç seçili olur (Word gibi)
     const at = replaceIn(matches[current], rIn.value);
     afterEdit();
     search();
@@ -196,6 +197,7 @@
     panel.style.top = tb.bottom + 8 + 'px';
     const wasHidden = panel.hidden;
     panel.hidden = false;
+    app.placeSymbolPanel && app.placeSymbolPanel(); // simge paneli açıksa bu panelin altına
     // Seçili kısa metin aranacak metin olur (Word gibi)
     const r = app.getCaretRange && app.getCaretRange();
     const sel = r && !r.collapsed ? r.toString() : '';
@@ -211,6 +213,7 @@
 
   function close() {
     panel.hidden = true;
+    app.placeSymbolPanel && app.placeSymbolPanel();
     observer.disconnect();
     clearTimeout(timer);
     if (HL) {

@@ -3,7 +3,8 @@
  * Sol (kutu): sol girinti ilk satırla birlikte. Sağ (sağdaki üçgen): sağ girinti.
  * Sekme durakları (core.js: data-tabs): cetvele tıklamak soldaki kutuda seçili türde durak koyar, durak sürüklenerek
  * taşınır, cetvelin dışına (aşağı/yukarı) sürüklenince kalkar; çift tık Sekmeler penceresini açar.
- * 0,25 cm'ye yapışır (Alt: serbest). Liste maddelerinde girinti düzeye bağlıdır: işaretler yalnızca gösterilir.
+ * 0,25 cm'ye yapışır (Alt: serbest). Liste maddesinde ilk satır işaretin, asılı metnin yeridir (core.js:
+ * setListIndent; listenin bütün maddeleri seçiliyse bütün düzeye yazılır).
  */
 (function () {
   'use strict';
@@ -105,7 +106,6 @@
     const L = (br.left - er.left) / z + (parseFloat(cs.paddingLeft) || 0);
     const R = (er.right - br.right) / z + (parseFloat(cs.paddingRight) || 0);
     setMarks(L + (parseFloat(cs.textIndent) || 0), L, R);
-    pageEl.classList.toggle('list', b.tagName === 'LI');
   }
 
   app.updateRuler = function () {
@@ -186,13 +186,16 @@
     if (e.target === typeEl || typeEl.contains(e.target) || pageEl.classList.contains('off')) return;
     const stop = e.target.closest('.rt');
     if (stop || (!m && pageEl.contains(e.target))) return tabPointer(e, stop);
-    if (!m || pageEl.classList.contains('list')) return;
+    if (!m) return;
     app.focusEditor();
-    const blocks = app.selectedBlocks().filter((b) => b.tagName !== 'LI' && !b.classList.contains('pb'));
+    const blocks = app.selectedBlocks().filter((b) => !b.classList.contains('pb'));
     if (!blocks.length) return;
+    const items = blocks.filter((b) => b.tagName === 'LI');
+    const paras = blocks.filter((b) => b.tagName !== 'LI');
     const cs = getComputedStyle(blocks[0]);
-    const L0 = parseFloat(cs.marginLeft) || 0;
-    const T0 = parseFloat(cs.textIndent) || 0;
+    const li0 = blocks[0].tagName === 'LI' && app.listIndent(blocks[0]);
+    const L0 = li0 ? li0.left : parseFloat(cs.marginLeft) || 0;
+    const T0 = li0 ? li0.first : parseFloat(cs.textIndent) || 0;
     const R0 = parseFloat(cs.marginRight) || 0;
     const x0 = e.clientX;
     const kind = m.dataset.rm;
@@ -211,11 +214,12 @@
       } else if (kind === 'left') L = Math.max(Math.max(0, -T0), snap(L0 + d));
       else R = Math.max(0, snap(R0 - d));
       if (g.cw - Math.max(L, L + T) - R < U.cmToPx(2)) return; // metne en az 2 cm kalsın
-      for (const b of blocks) {
+      for (const b of paras) {
         app.setIndent(b, 'marginLeft', L);
         app.setIndent(b, 'textIndent', T);
-        app.setIndent(b, 'marginRight', R);
       }
+      if (items.length) app.applyListIndent(items, L, T);
+      for (const b of blocks) app.setIndent(b, 'marginRight', R);
       moved = true;
       setMarks(L + T, L, R);
       app.scheduleLayout();

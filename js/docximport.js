@@ -459,6 +459,22 @@
     return res;
   }
 
+  // Liste paragrafının girintisi (nk): metnin yeri (left) ve işaretin ona göre yeri (first; eksi: asılı). Paragrafın
+  // kendi w:ind'i önce gelir; sonra numara paragrafta verilmişse numaralandırma düzeyininki, stilden geliyorsa stilinki
+  // (Word gibi); ikisinde de yoksa öteki. Hiçbiri girinti vermiyorsa (tanımsız düzey) null: editörün varsayılanı.
+  function listInd(pPr, sp, L) {
+    const di = kid(pPr, W, 'ind');
+    const dv = (k) => (wa(di, k) === null ? null : +wa(di, k) / 20);
+    const lv = L && L.left !== null ? { left: L.left, first: -L.hang } : {};
+    const sv = { left: sp.left, first: sp.first };
+    if (!di && lv.left === undefined && sv.left === undefined) return null;
+    const [a, b] = kid(pPr, W, 'numPr') ? [lv, sv] : [sv, lv];
+    return {
+      left: dv('left') ?? dv('start') ?? a.left ?? b.left ?? 0,
+      first: dv('hanging') !== null ? -dv('hanging') : dv('firstLine') ?? a.first ?? b.first ?? 0,
+    };
+  }
+
   function paraInfo(ctx, p) {
     const pPr = kid(p, W, 'pPr');
     const styleId = wa(kid(pPr, W, 'pStyle'), 'val') || ctx.styles.defPara;
@@ -473,13 +489,15 @@
       const ilvl = pp.ilvl || 0;
       const text = ctx.numbering.next(pp.numId, ilvl);
       const fmt = ctx.numbering.fmt(pp.numId, ilvl);
-      // indent: görsel düzey için (renderBlocks); value: numaralı listenin bu maddedeki sayacı (start için);
-      // abs: Word'deki liste tanımı (ayrı listeler ayrı kalır); lf: düzeyin biçimi (a), I., –…)
+      // indent: görsel düzey için (renderBlocks; stilin ya da düzeyin girintisi: paragrafın kendi girintisi, ör. Word'e
+      // aktarılmış ayrı girintili bitişik listeler, düzeyi değiştirmez, maddenin yerini ind verir); value: numaralı
+      // listenin bu maddedeki sayacı (start için); abs: Word'deki liste tanımı (ayrı listeler ayrı kalır); lf: düzeyin
+      // biçimi (a), I., –…)
       const lvLeft = ctx.numbering.left(pp.numId, ilvl);
       const L = ctx.numbering.level(pp.numId, ilvl);
       if (fmt && fmt !== 'none')
-        list = { ordered: fmt !== 'bullet', ilvl, indent: pp.left !== undefined ? pp.left : lvLeft, value: ctx.numbering.count(pp.numId, ilvl),
-          abs: L ? L.abs : null, lf: L ? lfOf(L) : null, style: pp.ctxSpacing ? styleId : null };
+        list = { ordered: fmt !== 'bullet', ilvl, indent: base.pp.left !== undefined ? base.pp.left : lvLeft, value: ctx.numbering.count(pp.numId, ilvl),
+          abs: L ? L.abs : null, lf: L ? lfOf(L) : null, style: pp.ctxSpacing ? styleId : null, ind: listInd(pPr, base.pp, L) };
       hnum = { numId: pp.numId, ilvl, text }; // başlığın numarası (headingNumbering)
     }
     const tag = heading ? 'h' + Math.min(heading, 3) : 'p';
@@ -1108,6 +1126,11 @@
       fill(li, b);
       s.el.appendChild(li);
       s.lastLi = li;
+      // Girinti Word'deki gibi (core.js: setListIndent): listenin ilk maddesininki bütün düzeyin, farklı olan madde kendisinin
+      const ind = b.list.ind;
+      const px = (pt) => (pt * 4) / 3;
+      if (ind && !s.ind) app.setListIndent(s.el, px((s.ind = ind).left), px(ind.first));
+      else if (ind && (Math.abs(ind.left - s.ind.left) > 0.5 || Math.abs(ind.first - s.ind.first) > 0.5)) app.setListIndent(li, px(ind.left), px(ind.first));
       s.value = b.list.value;
       last = { top: stack[0].el, style: b.list.style };
     }
