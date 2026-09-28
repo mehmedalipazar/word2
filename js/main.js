@@ -12,9 +12,10 @@
 
   // ---------- Komutlar ----------
   const commands = {
-    new: newDoc,
+    new: () => newDoc(false),
     open: openDoc,
     save: () => saveDoc(false),
+    close: () => newDoc(true),
     docx: exportDocx,
     print: printDoc,
     undo: () => app.undo(),
@@ -655,15 +656,35 @@
       },
     },
   ];
-  const confirmDiscard = () =>
-    !dirty || !hasContent() || window.confirm('Açık belgedeki kaydedilmemiş değişiklikler kaybolacak. Devam edilsin mi?');
+  // Word gibi: kaydedilmemiş değişiklik varsa "Kaydet / Kaydetme / Vazgeç" sorulur; true: devam edilebilir.
+  // Kaydet seçilip kayıt penceresinden vazgeçilirse belge açık kalır.
+  const saveDlg = $('saveDialog');
+  function askSave() {
+    if (saveDlg.open) return Promise.resolve(''); // pencere açıkken gelen ikinci istek (ör. Ctrl+O)
+    $('saveAsk').textContent = `"${state.fileName}" belgesinde kaydedilmemiş değişiklikler var. Kaydetmezseniz bu değişiklikler kaybolur.`;
+    saveDlg.returnValue = '';
+    saveDlg.showModal();
+    return new Promise((resolve) => saveDlg.addEventListener('close', () => resolve(saveDlg.returnValue), { once: true }));
+  }
+  async function confirmDiscard() {
+    if (!dirty || !hasContent()) return true;
+    const answer = await askSave();
+    if (answer === 'discard') return true;
+    if (answer !== 'save') return false;
+    await saveDoc(false);
+    return !dirty;
+  }
 
-  function newDoc() {
-    if (!confirmDiscard()) return;
+  // Yeni belge ya da belgeyi kapat (Word: Dosya > Kapat). Tek belgelik uygulamada kapatınca boş belge kalır; boş
+  // belgenin kaydı tutulmadığı için bu sekmenin kurtarma kaydı da silinir. Ctrl+W ve Ctrl+F4 tarayıcıya ayrılmış.
+  async function newDoc(closing) {
+    if (!(await confirmDiscard())) return;
+    const name = state.fileName;
     fileHandle = null;
     app.newDocument();
     dirty = false;
     autosaveNow();
+    if (closing) SS.toast(`"${name}" kapatıldı.`);
     app.focusEditor();
   }
 
@@ -695,10 +716,14 @@
       return false;
     }
   }
-  app.openFile = (file) => confirmDiscard() && loadFile(file);
+  app.openFile = async (file) => (await confirmDiscard()) && loadFile(file);
 
   async function openDoc() {
-    if (!confirmDiscard()) return;
+    if (!(await confirmDiscard())) return;
+    // Kayıt penceresi uzun sürdüyse tıklamanın verdiği izin (geçici etkinlik) bitmiş olur ve Chrome dosya seçiciyi
+    // açmaz: sessizce hiçbir şey olmaması yerine yeniden tıklamayı iste
+    if (navigator.userActivation && !navigator.userActivation.isActive)
+      return void SS.toast("Açılacak dosyayı seçmek için Aç'a yeniden tıklayın.", 5000);
     if (window.showOpenFilePicker) {
       try {
         const [h] = await window.showOpenFilePicker({ types: OPEN_TYPES });

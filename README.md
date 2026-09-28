@@ -105,6 +105,9 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 - Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
   son yazılanlar da korunur; kaydedilmemiş değişiklik varken kapatma/yenilemede tarayıcı uyarır. Kapanan sekmenin
   belgesi, sonra açılan yeni sekmede geri gelir.
+- **Kapat**: belgeyi kapatır. Kaydedilmemiş değişiklik varsa Word'deki gibi Kaydet / Kaydetme / Vazgeç sorar; Yeni, Aç
+  ve dosyayı sayfaya sürükleyip bırakma da aynı soruyu sorar. Kaydet seçilip kayıt penceresinden vazgeçilirse belge
+  açık kalır. Kapatınca boş belge açılır ve sekmenin kurtarma kaydı silinir. Ctrl+W tarayıcıya ayrıldığı için kısayolu yok.
 - **Word belgesi açma (.docx)**: metin, başlıklar (numaralarıyla), biçimler, listeler (düzeyleri ve biçimleriyle: a), I.,
   1.1., –…; araya paragraf girse de numara sürer), satır aralıkları, girintiler, sekme durakları, sayfa ayarları, üst/alt bilgi (metin ve sayfa numarası), resimler
   (kırpma/döndürme/metin kaydırma dahil). Resmin hemen altındaki "Şekil 3. …" paragrafı ya da resimle gruplanmış

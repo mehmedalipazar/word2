@@ -376,6 +376,7 @@ select {
 .dialog .hf-tools { display: flex; justify-content: flex-end; margin-top: -2px; }
 .dialog .wide { grid-column: 1 / -1; }
 .dialog .hint-text { margin: 0; font-size: 12px; color: var(--muted); }
+.dialog .ask { margin: 0; font-size: 13px; max-width: 420px; }
 .dialog .actions .grow { flex: 1; }
 .dialog .span2 { grid-column: span 2; }
 .dialog .tab-list { height: auto; font-variant-numeric: tabular-nums; }

@@ -16,6 +16,7 @@
     <button class="btn" data-cmd="new" data-icon="file" title="Yeni belge">Yeni</button>
     <button class="btn" data-cmd="open" data-icon="open" title="Aç: SerbestSayfa (.sayfa) ya da Word (.docx) belgesi (Ctrl+O)">Aç</button>
     <button class="btn" data-cmd="save" data-icon="save" title="Kaydet (Ctrl+S)">Kaydet</button>
+    <button class="btn" data-cmd="close" data-icon="close" title="Belgeyi kapat (kaydedilmemiş değişiklik varsa kaydetmeyi sorar)">Kapat</button>
     <span class="sep"></span>
     <button class="btn" data-cmd="docx" data-icon="download" title="Word (.docx) olarak dışa aktar">Word'e aktar</button>
     <button class="btn primary" data-cmd="print" data-icon="printer" title="Yazdır / PDF olarak kaydet (Ctrl+P)">PDF / Yazdır</button>
@@ -434,6 +435,20 @@
     <p class="hint-text">Başlık ve liste numaraları, şekil yazıları ve üst/alt bilgi sayılmaz.</p>
     <div class="actions">
       <button value="ok" class="btn primary">Kapat</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Word gibi: Yeni, Aç, Kapat ve sürükle-bırakta kaydedilmemiş değişiklik varsa (main.js: confirmDiscard) -->
+<dialog id="saveDialog" class="dialog">
+  <form method="dialog">
+    <h2>Değişiklikler kaydedilsin mi?</h2>
+    <p class="ask" id="saveAsk"></p>
+    <div class="actions">
+      <button value="discard" class="btn">Kaydetme</button>
+      <span class="grow"></span>
+      <button type="button" value="cancel" class="btn">Vazgeç</button>
+      <button value="save" class="btn primary" autofocus>Kaydet</button>
     </div>
   </form>
 </dialog>

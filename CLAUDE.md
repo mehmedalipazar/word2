@@ -119,6 +119,9 @@ Each file is an IIFE that attaches to `window.SS`. Shared state and cross-module
 - **Autosave** is per tab: IndexedDB key `autosave:<tab id>`, where the tab id lives in `sessionStorage`. Each open tab holds a Web Lock (`serbestsayfa-sekme:<id>`). A new tab adopts only records whose lock is free (closed tabs). The old single `autosave` key is adopted the same way.
   - On `pagehide`, `beforeunload` and `visibilitychange→hidden`, unsaved changes are also written synchronously to `localStorage` (`serbestsayfa-acil:<id>`), because async IndexedDB writes don't survive unload. On startup the newer of the two is used.
   - `beforeunload` asks before closing while there are unsaved changes (cleared by save, open, new, and Word export).
+  - Inside the app, New, Open, dropping a file and Close go through async `confirmDiscard()`. With unsaved changes it shows `#saveDialog` (Kaydet / Kaydetme / Vazgeç). Kaydet runs `saveDoc` and continues only if the document really got saved.
+  - A save picker can outlast the click's transient activation. `openDoc` then asks for another click instead of calling a file picker Chrome would block.
+  - Close is New plus a toast. The empty document's autosave deletes the tab's recovery record.
 
 ### Text editing (text.js)
 
