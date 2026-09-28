@@ -6,6 +6,12 @@ Resimleri sürükle-bırakla **istediğiniz yere koyabildiğiniz** ve metin değ
 
 `index.html` dosyasına çift tıklayın (Chrome veya Edge). İnternet bağlantısı gerekmez.
 
+## Web'de yayın
+
+Uygulama Cloudflare Pages'te yayınlanır; `main` dalına her gönderimde (git push) kendiliğinden güncellenir.
+Yayına yalnızca uygulama dosyaları girer (`build.sh`: `index.html`, `css/`, `js/`, `_headers`).
+Belgeler hiçbir sunucuya gitmez; her kullanıcının kendi tarayıcısında kalır.
+
 ## Neden Word'deki gibi kaymıyor?
 
 Word'de resim bir paragrafa **bağlıdır** (çapa). Metin değişince paragraf yer değiştirir, resim de onunla gider.

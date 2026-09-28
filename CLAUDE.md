@@ -27,6 +27,14 @@ The project has no build step, no dependencies and no `package.json`. The target
   LibreOffice breaks lines slightly differently from Chrome and Word. Compare page counts and image positions, not individual lines.
 - Keep scratch test output (`.test/`, `.playwright-mcp/`) out of the repo, or delete it afterwards.
 
+## Deployment
+
+- The site runs on Cloudflare Pages, connected to the GitHub repo. Every push to `main` is deployed.
+- Pages settings: framework preset None, build command `sh build.sh`, build output directory `dist`.
+- `build.sh` copies only the app into `dist/`: `index.html`, `css/`, `js/` and `_headers`. README.md, CLAUDE.md and the git files are not published. A new top-level file or folder the app needs must be added to `build.sh` too.
+- `_headers` sets response headers: `nosniff`, no framing, referrer policy.
+- The app itself still has no build step. Keep `index.html` working over `file://`.
+
 ## Architecture
 
 Script order in `index.html` is the dependency order:
