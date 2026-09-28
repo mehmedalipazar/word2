@@ -29,11 +29,13 @@
     <button class="tb" data-cmd="redo" data-icon="redo" title="Yinele (Ctrl+Y)"></button>
   </div>
   <div class="group">
-    <select id="blockStyle" title="Paragraf stili (Ctrl+Alt+1/2/3: Başlık 1/2/3)">
+    <select id="blockStyle" title="Paragraf stili (Ctrl+Alt+1/2/3: Başlık 1/2/3). &quot;Stili değiştir…&quot;: stilin yazı tipi, punto, rengi ve aralıkları; belgenin varsayılan yazı tipi (Normal)">
       <option value="p">Normal</option>
       <option value="h1">Başlık 1</option>
       <option value="h2">Başlık 2</option>
       <option value="h3">Başlık 3</option>
+      <option disabled>──────────</option>
+      <option value="edit">Stili değiştir…</option>
     </select>
     <!-- Yazılabilir kutular: liste oktan açılır, değer yazılıp Enter ile uygulanır (text.js: combo); yazı tipleri text.js'te -->
     <span class="combo" title="Yazı tipi: listeden seçin ya da adını yazıp Enter'a basın">
@@ -59,6 +61,7 @@
     <label class="tb color-tb" title="Yazı rengi"><span class="letter">A</span><span class="bar" id="foreBar"></span><input type="color" id="foreColor" value="#c00000"></label>
     <label class="tb color-tb" title="Vurgu rengi"><span data-icon="highlight"></span><span class="bar" id="backBar"></span><input type="color" id="backColor" value="#ffff00"></label>
     <button class="tb" data-cmd="link" data-icon="link" title="Köprü ekle / düzenle (Ctrl+K); Ctrl+tık: bağlantıyı aç"></button>
+    <button class="tb" data-cmd="formatPainter" data-icon="paintbrush" title="Biçim boyacısı: biçimi kopyalayıp uygulanacak metni seçin; çift tık: sürekli, Esc: bitir (Ctrl+Shift+C / Ctrl+Shift+V)"></button>
     <button class="tb" data-cmd="removeFormat" data-icon="eraser" title="Biçimi temizle (Ctrl+Boşluk)"></button>
   </div>
   <div class="group">
@@ -246,6 +249,39 @@
     <div class="actions">
       <button type="button" value="cancel" class="btn">Vazgeç</button>
       <button value="ok" class="btn primary">Uygula</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="styleDialog" class="dialog">
+  <form method="dialog">
+    <h2>Stili değiştir</h2>
+    <div class="row">
+      <label>Stil<select name="style"><option value="p">Normal (belgenin varsayılan yazı tipi)</option><option value="h1">Başlık 1</option><option value="h2">Başlık 2</option><option value="h3">Başlık 3</option></select></label>
+    </div>
+    <fieldset>
+      <legend>Yazı tipi</legend>
+      <label class="span2">Yazı tipi<select name="font"></select></label>
+      <label>Punto<input name="size" inputmode="decimal" autocomplete="off"></label>
+      <label>Renk<input name="color" type="color"></label>
+      <label class="chk"><input name="bold" type="checkbox"> Kalın</label>
+      <label class="chk"><input name="italic" type="checkbox"> İtalik</label>
+    </fieldset>
+    <fieldset>
+      <legend>Paragraf</legend>
+      <label>Hizalama<select name="align"><option value="left">Sola</option><option value="center">Ortala</option><option value="right">Sağa</option><option value="justify">İki yana</option></select></label>
+      <label>Önce (nk)<input name="before" inputmode="decimal" autocomplete="off"></label>
+      <label>Sonra (nk)<input name="after" inputmode="decimal" autocomplete="off"></label>
+      <label title="Word'deki gibi satır cinsinden: 1 tek, 1,08 Word'ün varsayılanı, 1,5, 2 çift">Satır aralığı<input name="line" inputmode="decimal" autocomplete="off"></label>
+    </fieldset>
+    <div class="style-preview" id="stylePreview">Aa Bb Çç Ğğ İi Öö Şş Üü 0123</div>
+    <p class="hint-text">Değişiklik bu stildeki bütün paragraflara uygulanır. Paragraflara ayrıca verilmiş biçim korunur.</p>
+    <div class="actions">
+      <button type="button" class="btn" id="styleFromSel" title="İmlecin bulunduğu paragrafın biçimini bu stile al (Word: Seçimle eşleşecek şekilde güncelle)">Seçimden al</button>
+      <button type="button" class="btn" id="styleDefault" title="Stilleri bu belgeye uygula ve yeni belgelerde de kullan">Varsayılan olarak ayarla</button>
+      <span class="grow"></span>
+      <button type="button" value="cancel" class="btn">Vazgeç</button>
+      <button value="ok" class="btn primary" formnovalidate>Uygula</button>
     </div>
   </form>
 </dialog>

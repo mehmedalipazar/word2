@@ -296,19 +296,29 @@
       `<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr>${anchorsFor(k, true)}</w:p>`;
 
     // ---- Biçim ----
+    // Paragrafın stili (Normal ya da Başlık 1–3). Stilin verdiği yazı tipi, punto, kalınlık, italik, renk, aralık ve
+    // hizalama Word'e doğrudan biçim olarak yazılmaz (styles.xml'de): Word'de stili değiştirmek bu metni de değiştirir.
+    const styleOf = (blockEl) => {
+      const m = /^H([1-6])$/.exec(blockEl.tagName);
+      return state.styles[m ? 'h' + Math.min(3, +m[1]) : 'p'];
+    };
+    const hexUp = (c) => c.slice(1).toUpperCase();
+    const JC = { left: 'left', center: 'center', right: 'right', justify: 'both' };
     const rPrCache = new Map();
     function rPr(el, blockEl) {
       const key = el;
       if (rPrCache.has(key)) return rPrCache.get(key);
       const cs = getComputedStyle(el);
+      const st = styleOf(blockEl);
       const p = [];
       const inLink = !!el.closest('a');
       if (inLink) p.push('<w:rStyle w:val="Hyperlink"/>'); // rPr'nin ilk öğesi; mavi renk ve alt çizgi stilden gelir
       const font = firstFamily(cs.fontFamily);
-      if (font !== DEFAULT_FONT) p.push(`<w:rFonts w:ascii="${esc(font)}" w:hAnsi="${esc(font)}" w:eastAsia="${esc(font)}" w:cs="${esc(font)}"/>`);
-      if (parseInt(cs.fontWeight, 10) >= 600) p.push('<w:b/><w:bCs/>');
-      else if (/^H[1-6]$/.test(blockEl.tagName)) p.push('<w:b w:val="0"/><w:bCs w:val="0"/>'); // başlık stili kalın: normal metin açıkça
-      if (cs.fontStyle === 'italic' || cs.fontStyle === 'oblique') p.push('<w:i/><w:iCs/>');
+      if (font.toLowerCase() !== st.font.toLowerCase()) p.push(`<w:rFonts w:ascii="${esc(font)}" w:hAnsi="${esc(font)}" w:eastAsia="${esc(font)}" w:cs="${esc(font)}"/>`);
+      const bold = parseInt(cs.fontWeight, 10) >= 600;
+      if (bold !== st.bold) p.push(bold ? '<w:b/><w:bCs/>' : '<w:b w:val="0"/><w:bCs w:val="0"/>');
+      const italic = cs.fontStyle === 'italic' || cs.fontStyle === 'oblique';
+      if (italic !== st.italic) p.push(italic ? '<w:i/><w:iCs/>' : '<w:i w:val="0"/><w:iCs w:val="0"/>');
       let underline = false;
       let strike = false;
       let bg = null;
@@ -325,16 +335,16 @@
       }
       if (strike) p.push('<w:strike/>');
       const color = rgbToHex(cs.color);
-      if (color && color !== '000000' && !(inLink && color === '0563C1')) p.push(`<w:color w:val="${color}"/>`);
+      if (color && color !== hexUp(st.color) && !(inLink && color === '0563C1')) p.push(`<w:color w:val="${color}"/>`);
       let px = parseFloat(cs.fontSize);
       const vaEl = va && el.closest('sup,sub'); // <sup>/<sub> küçültülmüş çizilir: Word'e asıl punto gider
       if (vaEl) px = parseFloat(getComputedStyle(vaEl.parentElement).fontSize);
       const hp = Math.max(2, Math.round(px * 1.5));
-      p.push(`<w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/>`);
+      if (hp !== Math.round(st.size * 2)) p.push(`<w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/>`);
       if (underline) p.push('<w:u w:val="single"/>');
       if (bg) p.push(`<w:shd w:val="clear" w:color="auto" w:fill="${bg}"/>`);
       if (va) p.push(`<w:vertAlign w:val="${va}"/>`);
-      const xml = `<w:rPr>${p.join('')}</w:rPr>`;
+      const xml = p.length ? `<w:rPr>${p.join('')}</w:rPr>` : '';
       rPrCache.set(key, xml);
       return xml;
     }
@@ -358,11 +368,16 @@
       if (o.pageBreakBefore) p.push('<w:pageBreakBefore/>');
       if (o.numId && !o.cont) p.push(`<w:numPr><w:ilvl w:val="${o.ilvl}"/><w:numId w:val="${o.numId}"/></w:numPr>`);
       const fontPx = parseFloat(cs.fontSize);
+      const st = styleOf(blockEl);
       // Birimsiz satır yüksekliği Word'ün "satır katı"dır (auto); birimli değer "En az"
       const ls = app.lineSpacing(blockEl);
-      const line = ls.px ? `w:line="${twip(ls.px)}" w:lineRule="atLeast"` : `w:line="${Math.round(240 * ls.multiple)}" w:lineRule="auto"`;
+      const lineTw = ls.px ? null : Math.round(240 * ls.multiple);
+      const line = ls.px ? `w:line="${twip(ls.px)}" w:lineRule="atLeast"` : `w:line="${lineTw}" w:lineRule="auto"`;
       const before = o.cont ? 0 : Math.max(0, o.mt - prevAfter);
-      p.push(`<w:spacing w:before="${twip(before)}" w:after="${twip(o.mb)}" ${line}/>`);
+      // Stilinkiyle aynıysa aralık yazılmaz (±1 twip: yuvarlama)
+      const near = (a, b) => Math.abs(a - b) <= 1;
+      const sameSpacing = near(twip(before), st.before * 20) && near(twip(o.mb), st.after * 20) && lineTw !== null && near(lineTw, 240 * st.line);
+      if (!sameSpacing) p.push(`<w:spacing w:before="${twip(before)}" w:after="${twip(o.mb)}" ${line}/>`);
       if (o.numId && o.cont) p.push(`<w:ind w:left="${720 * (o.ilvl + 1)}"/>`);
       else if (!o.numId) {
         const ml = parseFloat(cs.marginLeft) || 0;
@@ -375,10 +390,10 @@
         else if (ti < 0) ind.push(`w:hanging="${twip(-ti)}"`);
         if (ind.length) p.push(`<w:ind ${ind.join(' ')}/>`);
       }
-      const jc = { center: 'center', right: 'right', end: 'right', justify: 'both' }[cs.textAlign];
-      if (jc) p.push(`<w:jc w:val="${jc}"/>`);
+      const jc = { center: 'center', right: 'right', end: 'right', justify: 'both' }[cs.textAlign] || 'left';
+      if (jc !== JC[st.align]) p.push(`<w:jc w:val="${jc}"/>`);
       const hp = Math.round(fontPx * 1.5);
-      p.push(`<w:rPr><w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/></w:rPr>`);
+      if (hp !== Math.round(st.size * 2)) p.push(`<w:rPr><w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/></w:rPr>`);
       prevAfter = o.mb;
       return `<w:pPr>${p.join('')}</w:pPr>`;
     }
@@ -568,22 +583,37 @@
       'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
       `<w:body>${body.join('')}${sectPr}</w:body></w:document>`;
 
-    const heading = (id, name, lvl, hp, before, after) =>
-      `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>` +
-      `<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="${before}" w:after="${after}"/><w:outlineLvl w:val="${lvl}"/></w:pPr><w:rPr><w:b/><w:bCs/><w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/></w:rPr></w:style>`;
+    // Belgenin stilleri (state.styles): Normal docDefaults + Normal stilinde, Başlık 1–3 Normal'e dayanır
+    const S = state.styles;
+    const rFontsX = (f) => `<w:rFonts w:ascii="${esc(f)}" w:hAnsi="${esc(f)}" w:eastAsia="${esc(f)}" w:cs="${esc(f)}"/>`;
+    const spacingX = (s) => `<w:spacing w:before="${Math.round(s.before * 20)}" w:after="${Math.round(s.after * 20)}" w:line="${Math.round(240 * s.line)}" w:lineRule="auto"/>`;
+    const jcX = (s, base) => (s.align === base ? '' : `<w:jc w:val="${JC[s.align]}"/>`);
+    const onOffX = (tag, on, baseOn) => (on === baseOn ? '' : on ? `<w:${tag}/><w:${tag}Cs/>` : `<w:${tag} w:val="0"/><w:${tag}Cs w:val="0"/>`);
+    const heading = (k, id, name, lvl) => {
+      const s = S[k];
+      const hp = Math.round(s.size * 2);
+      return (
+        `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>` +
+        `<w:pPr><w:keepNext/><w:keepLines/>${spacingX(s)}${jcX(s, S.p.align)}<w:outlineLvl w:val="${lvl}"/></w:pPr>` +
+        `<w:rPr>${s.font.toLowerCase() !== S.p.font.toLowerCase() ? rFontsX(s.font) : ''}${onOffX('b', s.bold, S.p.bold)}${onOffX('i', s.italic, S.p.italic)}` +
+        `${s.color !== S.p.color ? `<w:color w:val="${hexUp(s.color)}"/>` : ''}<w:sz w:val="${hp}"/><w:szCs w:val="${hp}"/></w:rPr></w:style>`
+      );
+    };
+    const normalRPr = onOffX('b', S.p.bold, false) + onOffX('i', S.p.italic, false) + (S.p.color !== '#000000' ? `<w:color w:val="${hexUp(S.p.color)}"/>` : '');
     const stylesXml =
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-      '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/>' +
-      '<w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="tr-TR" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>' +
+      `<w:docDefaults><w:rPrDefault><w:rPr>${rFontsX(S.p.font)}` +
+      `<w:sz w:val="${Math.round(S.p.size * 2)}"/><w:szCs w:val="${Math.round(S.p.size * 2)}"/><w:lang w:val="tr-TR" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>` +
       // Dul/öksüz satır denetimi açık: editörün sayfalaması da aynı kuralı uygular (core.js: boundaryCut)
-      '<w:pPrDefault><w:pPr><w:widowControl/><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
-      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +
+      `<w:pPrDefault><w:pPr><w:widowControl/>${spacingX(S.p)}</w:pPr></w:pPrDefault></w:docDefaults>` +
+      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>' +
+      `${S.p.align !== 'left' ? `<w:pPr>${jcX(S.p, 'left')}</w:pPr>` : ''}${normalRPr ? `<w:rPr>${normalRPr}</w:rPr>` : ''}</w:style>` +
       '<w:style w:type="character" w:default="1" w:styleId="DefaultParagraphFont"><w:name w:val="Default Paragraph Font"/><w:uiPriority w:val="1"/><w:semiHidden/><w:unhideWhenUsed/></w:style>' +
       '<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:basedOn w:val="DefaultParagraphFont"/><w:uiPriority w:val="99"/><w:unhideWhenUsed/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style>' +
-      heading('Heading1', 'heading 1', 0, 36, 240, 120) +
-      heading('Heading2', 'heading 2', 1, 28, 200, 100) +
-      heading('Heading3', 'heading 3', 2, 24, 160, 80) +
+      heading('h1', 'Heading1', 'heading 1', 0) +
+      heading('h2', 'Heading2', 'heading 2', 1) +
+      heading('h3', 'Heading3', 'heading 3', 2) +
       '<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="35"/><w:unhideWhenUsed/><w:qFormat/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>' +
       '<w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="99"/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>' +
       '<w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="99"/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>' +

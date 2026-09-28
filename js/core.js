@@ -34,9 +34,69 @@
   const emptyHF = () => ({ header: ['', '', ''], footer: ['', '', ''], firstPage: false });
   app.emptyHF = emptyHF;
 
+  // ---------- Belge stilleri (Word'ün Normal ve Başlık 1–3'ü) ----------
+  // font: yazı tipi adı, size: punto, color: #rrggbb, align: left|center|right|justify, before/after: paragraf
+  // öncesi/sonrası aralık (nk), line: satır aralığı (Word satır katı). Editörün CSS'i bunlardan üretilir
+  // (applyStyles); stildeki paragraflarda satır içi biçim yalnızca stilden farklı olan için vardır. Yerleşik
+  // değerler css/app.css'teki varsayılanlarla aynı.
+  // Word'ün "1,08 satır"ı aslında 259/240'tır (w:line="259"); Calibri'de 1,3177 (css: .editor)
+  const L108 = 259 / 240;
+  const BUILTIN_STYLES = {
+    p: { font: 'Calibri', size: 11, bold: false, italic: false, color: '#000000', align: 'left', before: 0, after: 8, line: L108 },
+    h1: { font: 'Calibri', size: 18, bold: true, italic: false, color: '#000000', align: 'left', before: 12, after: 6, line: L108 },
+    h2: { font: 'Calibri', size: 14, bold: true, italic: false, color: '#000000', align: 'left', before: 10, after: 5, line: L108 },
+    h3: { font: 'Calibri', size: 12, bold: true, italic: false, color: '#000000', align: 'left', before: 8, after: 4, line: L108 },
+  };
+  app.STYLE_KEYS = ['p', 'h1', 'h2', 'h3'];
+  app.STYLE_NAMES = { p: 'Normal', h1: 'Başlık 1', h2: 'Başlık 2', h3: 'Başlık 3' };
+  app.builtinStyles = () => JSON.parse(JSON.stringify(BUILTIN_STYLES));
+  // Dışarıdan gelen (dosya, yerel kayıt) stilleri denetle; eksik ya da bozuk alan yerleşik değeri alır
+  app.cleanStyles = function (src, base = BUILTIN_STYLES) {
+    const out = {};
+    for (const k of app.STYLE_KEYS) {
+      const s = (src && typeof src[k] === 'object' && src[k]) || {};
+      const b = base[k] || BUILTIN_STYLES[k];
+      const num = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v) && v >= lo && v <= hi ? v : d);
+      out[k] = {
+        font: typeof s.font === 'string' && /^[\p{L}\p{N} ._-]{1,48}$/u.test(s.font.trim()) ? s.font.trim() : b.font,
+        size: num(s.size, 1, 1638, b.size),
+        bold: typeof s.bold === 'boolean' ? s.bold : b.bold,
+        italic: typeof s.italic === 'boolean' ? s.italic : b.italic,
+        color: typeof s.color === 'string' && /^#[0-9a-f]{6}$/i.test(s.color) ? s.color.toLowerCase() : b.color,
+        align: /^(left|center|right|justify)$/.test(s.align) ? s.align : b.align,
+        before: num(s.before, 0, 1584, b.before),
+        after: num(s.after, 0, 1584, b.after),
+        line: num(s.line, 0.06, 132, b.line),
+      };
+    }
+    return out;
+  };
+  // Yeni belgelerin stilleri: "Varsayılan olarak ayarla" ile saklananlar, yoksa yerleşik
+  const DEFAULT_STYLES_KEY = 'serbestsayfa-varsayilan-stiller';
+  app.defaultStyles = function () {
+    try {
+      const s = JSON.parse(localStorage.getItem(DEFAULT_STYLES_KEY) || 'null');
+      if (s) return app.cleanStyles(s);
+    } catch (_) { /* bozuk kayıt: yerleşik */ }
+    return app.builtinStyles();
+  };
+  app.saveDefaultStyles = function (styles) {
+    try {
+      localStorage.setItem(DEFAULT_STYLES_KEY, JSON.stringify(app.cleanStyles(styles)));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+  // Yazı tipinin CSS yığını: bulunmazsa editörün (ve SS.lineFactor'ün) yedek sırası kullanılır
+  app.fontStack = (f) => (/^calibri$/i.test(f) ? 'Calibri, Carlito, "Segoe UI", sans-serif' : `"${String(f).replace(/["\\]/g, '')}", Calibri, Carlito, sans-serif`);
+  // Stilin birimsiz CSS satır yüksekliği: Word satır katı × yazı tipinin tek satır katsayısı (bkz. lineSpacing)
+  app.styleLineHeight = (s) => +(s.line * SS.lineFactor(s.font)).toFixed(4);
+
   const state = (app.state = {
     page: defaultPage(),
     hf: emptyHF(),
+    styles: app.builtinStyles(),
     minPages: 1,
     pageCount: 1,
     images: [], // { id, asset, page, x, y, w, h, rot, wrap, locked, z }  (x,y: sayfa sol-üst köşesine göre px)
@@ -270,6 +330,34 @@
   app.updateDocSize = updateDocSize;
 
   app.fillHF = (s, k) => s.replace(/\{sayfa\}/g, String(k + 1)).replace(/\{toplam\}/g, String(state.pageCount));
+
+  // Stillerin CSS'i (css/app.css'teki varsayılanların üstüne; bu <style> ondan sonra gelir). Başlıklar kendi yazı
+  // tipinin satır katsayısıyla satır yüksekliği alır. Üst/alt bilgi ve şekil yazısı Word'deki gibi Normal'in yazı tipinde.
+  const docStyleEl = document.head.appendChild(document.createElement('style'));
+  docStyleEl.id = 'docStyles';
+  app.applyStyles = function () {
+    const S = state.styles;
+    const font = (s) =>
+      `font-family: ${app.fontStack(s.font)}; font-size: ${s.size}pt; font-weight: ${s.bold ? 'bold' : 'normal'}; ` +
+      `font-style: ${s.italic ? 'italic' : 'normal'}; color: ${s.color}; text-align: ${s.align}; line-height: ${app.styleLineHeight(s)};`;
+    const css = [
+      `.editor { ${font(S.p)} }`,
+      `.editor p, .editor div, .editor ul, .editor ol { margin: ${S.p.before}pt 0 ${S.p.after}pt; }`,
+      ...['h1', 'h2', 'h3'].map((k) => `.editor ${k} { ${font(S[k])} margin: ${S[k].before}pt 0 ${S[k].after}pt; }`),
+      `.page .hf, .cap { font-family: ${app.fontStack(S.p.font)}; }`,
+    ].join('\n');
+    if (docStyleEl.textContent !== css) docStyleEl.textContent = css;
+  };
+  app.applyStyles();
+  // Stil değişikliği: bütün sayfalar yeniden dizilir, tek geri alma adımı
+  app.setStyles = function (styles) {
+    if (JSON.stringify(styles) === JSON.stringify(state.styles)) return;
+    state.styles = styles;
+    app.applyStyles();
+    app.relayoutAll();
+    app.markDirty();
+    app.commit('edit');
+  };
 
   function renderPages() {
     const g = app.geom();
@@ -826,14 +914,57 @@
       while (s.firstChild) v.appendChild(s.firstChild);
       s.appendChild(v);
     });
-    if (!ed.querySelector(NESTED)) return false;
+    let changed = false;
+    if (ed.querySelector(NESTED)) {
+      const pins = pinSelection();
+      const runs = [];
+      let E;
+      while ((E = ed.querySelector(NESTED)) && E.parentElement) splitBlock(E.parentElement, runs);
+      runs.forEach((p) => !p.textContent.trim() && p.remove()); // bölünmeden kalan boş parçalar
+      unpinSelection(pins);
+      changed = true;
+    }
+    return hoistPageBreaks(ed) || changed;
+  };
+
+  // Sayfa sonu (.pb) her zaman editörün doğrudan çocuğudur. Liste maddesinde (Ctrl+Enter) ya da başka bir blokta
+  // kalan sayfa sonu, içinde bulunduğu üst düzey bloğu böler: ardındaki içerik (listede kalan maddeler, numara
+  // sürerek) sayfa sonundan sonra gelir. Liste içindeki sayfa sonu sayfalamayı durmadan büyütüyordu (sayfa sayısı
+  // sınırsız artıyor, sekme donuyordu).
+  function hoistPageBreaks(ed) {
+    const stray = [...ed.querySelectorAll('.pb')].filter((pb) => pb.parentElement !== ed);
+    if (!stray.length) return false;
     const pins = pinSelection();
-    const runs = [];
-    let E;
-    while ((E = ed.querySelector(NESTED)) && E.parentElement) splitBlock(E.parentElement, runs);
-    runs.forEach((p) => !p.textContent.trim() && p.remove()); // bölünmeden kalan boş parçalar
+    for (const pb of stray) {
+      const cut = app.splitTop(pb.parentNode, Array.prototype.indexOf.call(pb.parentNode.childNodes, pb) + 1);
+      cut.top.after(pb);
+      if (cut.rest) pb.after(cut.rest);
+      cut.dropEmptyTop();
+    }
     unpinSelection(pins);
     return true;
+  }
+
+  // Konumun (container, offset) üst düzey bloğunu ikiye böler: konumdan sonrası bloğun sığ kopyasına (rest) taşınır.
+  // Listede bölünen maddenin boş yarısı atılır, numaralı listede numara sürer (ol start). rest yerleştirilmez;
+  // içerik kalmadıysa null. dropEmptyTop(): baştaki parça boş kaldıysa onu kaldırır.
+  app.splitTop = function (container, offset) {
+    const ed = els.editor;
+    let top = container.nodeType === 1 ? container : container.parentNode;
+    while (top.parentElement !== ed) top = top.parentElement;
+    const tail = document.createRange();
+    tail.setStart(container, offset);
+    tail.setEnd(ed, Array.prototype.indexOf.call(ed.childNodes, top) + 1);
+    let rest = tail.extractContents().firstElementChild;
+    const hasText = (el) => !!el.textContent.trim() || !!el.querySelector('img, ul, ol');
+    for (const part of [top, rest]) {
+      if (!part || !/^(UL|OL)$/.test(part.tagName)) continue;
+      part.querySelectorAll('li').forEach((li) => !hasText(li) && !li.querySelector('br') && li.remove());
+    }
+    if (rest && rest.tagName === 'OL' && top.tagName === 'OL')
+      rest.setAttribute('start', (parseInt(top.getAttribute('start'), 10) || 1) + top.querySelectorAll(':scope > li').length);
+    if (rest && !hasText(rest) && !rest.querySelector('li')) rest = null;
+    return { top, rest, dropEmptyTop: () => !hasText(top) && !top.querySelector('li, br') && top.remove() };
   };
 
   app.layout = function () {
@@ -922,7 +1053,7 @@
     return {
       html: els.editor.innerHTML,
       images: JSON.stringify(state.images),
-      meta: JSON.stringify({ page: state.page, hf: state.hf, minPages: state.minPages }),
+      meta: JSON.stringify({ page: state.page, hf: state.hf, minPages: state.minPages, styles: state.styles }),
       sel: saveSel(),
       keep: keep.slice(), // sayfalama sonucu: geri alınınca düzen hemen doğru kurulsun
     };
@@ -965,6 +1096,7 @@
     app.normalizeBlocks(true);
     state.images = JSON.parse(s.images);
     Object.assign(state, JSON.parse(s.meta));
+    app.applyStyles();
     state.selection = state.selection.filter((id) => app.getImage(id));
     resetPagination(s.keep);
     app.relayoutAll();
@@ -999,6 +1131,7 @@
       title: state.fileName,
       page: state.page,
       hf: state.hf,
+      styles: state.styles,
       minPages: state.minPages,
       html: els.editor.innerHTML.replace(/ class="(el)?"/g, ''), // yardımcı sınıf düzen sırasında yeniden eklenir
       images: state.images,
@@ -1011,13 +1144,16 @@
     // Yapı, var olan belgeye dokunmadan önce denetlenir: bozuk dosya yarım yüklenip açık belgeyi bozmasın
     const obj = (v) => v == null || (typeof v === 'object' && !Array.isArray(v));
     const ok = data && data.app === 'SerbestSayfa' && (data.html == null || typeof data.html === 'string') &&
-      (data.images == null || Array.isArray(data.images)) && obj(data.assets) && obj(data.page) && obj(data.hf);
+      (data.images == null || Array.isArray(data.images)) && obj(data.assets) && obj(data.page) && obj(data.hf) && obj(data.styles);
     if (!ok) throw new Error('Bu dosya bir SerbestSayfa belgesi değil ya da bozuk.');
     state.page = data.page || defaultPage();
     // Eski dosyalardaki "Sayfa numarası (alt orta)" seçeneği alt bilginin orta yuvasına çevrilir
     const hf = data.hf || emptyHF();
     if (!data.hf && data.pageNumbers) hf.footer[1] = '{sayfa}';
     state.hf = { header: [0, 1, 2].map((i) => String((hf.header || [])[i] || '')), footer: [0, 1, 2].map((i) => String((hf.footer || [])[i] || '')), firstPage: !!hf.firstPage };
+    // Stil tanımı olmayan (eski) belgeler yerleşik stillerle yazılmıştı: kullanıcının varsayılanı değil, onlar
+    state.styles = app.cleanStyles(data.styles);
+    app.applyStyles();
     state.minPages = data.minPages || 1;
     state.images = data.images || [];
     state.assets = data.assets || {};
@@ -1036,6 +1172,6 @@
   };
 
   app.newDocument = function () {
-    app.load({ app: 'SerbestSayfa', page: defaultPage(), html: '<p><br></p>', images: [], assets: {} });
+    app.load({ app: 'SerbestSayfa', page: defaultPage(), styles: app.defaultStyles(), html: '<p><br></p>', images: [], assets: {} });
   };
 })();

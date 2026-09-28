@@ -148,6 +148,7 @@
       defR: kid(kid(dd, W, 'rPrDefault'), W, 'rPr'),
       defP: kid(kid(dd, W, 'pPrDefault'), W, 'pPr'),
       chain,
+      byName: (n) => [...map.values()].find((s) => s.name === n)?.id || null, // yerleşik adlar küçük harf İngilizce (Türkçe Word'de de)
     };
   }
 
@@ -335,14 +336,40 @@
     return o;
   }
 
-  // Editörün kendi varsayılanları (bunlardan farklı olanlar satır içi stil olarak yazılır).
-  // lh: css .editor line-height (Word'ün 1,08 satırı, Calibri); satır aralığı için core.js: lineSpacing.
-  const TAG = {
-    p: { font: 'Calibri', sz: 11, b: false, mt: 0, mb: 8, lh: 1.3177 },
-    h1: { font: 'Calibri', sz: 18, b: true, mt: 12, mb: 6, lh: 1.3177 },
-    h2: { font: 'Calibri', sz: 14, b: true, mt: 10, mb: 5, lh: 1.3177 },
-    h3: { font: 'Calibri', sz: 12, b: true, mt: 8, mb: 4, lh: 1.3177 },
-  };
+  // Word'ün stilleri → belgenin stilleri (core.js: state.styles). Normal = docDefaults + varsayılan paragraf stili;
+  // Başlık 1–3 = "heading 1–3" stilleri (belgede yoksa yerleşik olan). "En az"/"Tam" satır aralıklı stil 1 satır
+  // sayılır; o paragraflara aralık satır içi yazılır (paraCSS).
+  function importStyles(ctx) {
+    const def = app.builtinStyles();
+    const JCMAP = { center: 'center', right: 'right', end: 'right', both: 'justify', distribute: 'justify' };
+    const conv = (id) => {
+      const { pp, rb } = styleBase(ctx, id);
+      return {
+        font: rb.font,
+        size: rb.sz,
+        bold: !!rb.b,
+        italic: !!rb.i,
+        color: rb.color && /^#[0-9a-f]{6}$/.test(rb.color) ? rb.color : '#000000',
+        align: JCMAP[pp.jc] || 'left',
+        before: pp.before || 0,
+        after: pp.after || 0,
+        line: pp.line && (pp.lineRule || 'auto') === 'auto' ? pp.line / 240 : 1,
+      };
+    };
+    const out = { p: conv(ctx.styles.defPara) };
+    for (const [k, n] of [['h1', 'heading 1'], ['h2', 'heading 2'], ['h3', 'heading 3']]) {
+      const id = ctx.styles.byName(n);
+      out[k] = id ? conv(id) : def[k];
+    }
+    return app.cleanStyles(out);
+  }
+  // Belgenin stilleri (bunlardan farklı olanlar satır içi stil olarak yazılır); lh: stilin CSS satır yüksekliği
+  let TAG = null;
+  const tagFrom = (styles) =>
+    Object.fromEntries(app.STYLE_KEYS.map((k) => {
+      const s = styles[k];
+      return [k, { font: s.font, sz: s.size, b: s.bold, i: s.italic, color: s.color, align: s.align, mt: s.before, mb: s.after, lh: app.styleLineHeight(s) }];
+    }));
 
   const CAPTION_RE = /^\s*(Şekil|Sekil|Figure|Fig\.?|Harita|Fotoğraf|Foto|Resim|Grafik|Tablo|Table|Çizelge|Levha)\s*[-–]?\s*([0-9]+(?:[.\-–][0-9]+)*)\s*[.:\-–)]?\s*/i;
   const normLabel = (l) => {
@@ -400,8 +427,8 @@
   function paraCSS(pp, tag, lineFont, inList) {
     const d = TAG[tag];
     const st = [];
-    const jc = { center: 'center', right: 'right', end: 'right', both: 'justify', distribute: 'justify' }[pp.jc];
-    if (jc) st.push(`text-align: ${jc}`);
+    const jc = { center: 'center', right: 'right', end: 'right', both: 'justify', distribute: 'justify' }[pp.jc] || 'left';
+    if (jc !== d.align) st.push(`text-align: ${jc}`);
     if (!inList) {
       const mt = pp.before || 0;
       const mb = pp.after || 0;
@@ -832,12 +859,14 @@
     const st = [];
     if (p.font && p.font.toLowerCase() !== base.font.toLowerCase()) st.push(`font-family: '${p.font.replace(/['"]/g, '')}', Calibri, sans-serif`);
     if (p.sz && Math.abs(p.sz - base.sz) > 0.01) st.push(`font-size: ${p.sz}pt`);
-    if (p.color && !/^#0{6}$/.test(p.color)) st.push(`color: ${p.color}`);
+    // Renk, kalınlık ve italik paragrafın stiline göre (stil renkliyse "otomatik" metin siyah olarak yazılır)
+    if ((p.color || '#000000') !== (base.color || '#000000')) st.push(`color: ${p.color || '#000000'}`);
     if (p.hl) st.push(`background-color: ${p.hl}`);
     if (!p.b && base.b) st.push('font-weight: normal');
+    if (!p.i && base.i) st.push('font-style: normal');
     if (st.length) h = `<span style="${st.join('; ')}">${h}</span>`;
     if (p.b && !base.b) h = `<b>${h}</b>`;
-    if (p.i) h = `<i>${h}</i>`;
+    if (p.i && !base.i) h = `<i>${h}</i>`;
     if (p.u) h = `<u>${h}</u>`;
     if (p.s) h = `<s>${h}</s>`;
     if (p.href) h = `<a href="${esc(p.href)}">${h}</a>`;
@@ -1238,6 +1267,8 @@
       report: { images: 0, captions: 0, tables: 0, textboxes: 0, charts: 0, other: 0, skipped: 0, unsupported: 0, notes: 0 },
     };
     const blocks = attachCaptions(walkBody(body, ctx), ctx);
+    const styles = importStyles(ctx);
+    TAG = tagFrom(styles);
     const html = renderBlocks(blocks);
     const sect = kid(body, W, 'sectPr');
     const page = sect ? pageFromSect(sect) : app.defaultPage();
@@ -1248,7 +1279,7 @@
     // Belge adı Word'deki gibi dosya adıdır (belge özelliklerindeki "Başlık" değil): kaydetme ve Word'e aktarma bu adı önerir
     const title = file.name.replace(/\.docx$/i, '');
 
-    app.load({ app: 'SerbestSayfa', title, page, hf: hfRes.hf, html, images: [], assets });
+    app.load({ app: 'SerbestSayfa', title, page, hf: hfRes.hf, styles, html, images: [], assets });
     placeAll(ctx);
     app.relayoutAll();
     app.resetHistory();

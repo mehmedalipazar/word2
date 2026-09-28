@@ -73,9 +73,17 @@
     ensureContent();
     app.markDirtyAtSelection();
     app.scheduleLayout();
-    app.commit('edit');
+    if (!dragMove) app.commit('edit'); // sürükle-bırakla taşımanın silme yarısı ayrı adım olmaz
     updateToolbarState();
   }
+  // Sürükle-bırakla taşıma Word'deki gibi tek geri alma adımı: kaynağın silinmesi (deleteByDrag) kaydedilmez,
+  // bırakma (insertFromDrop) ikisini birlikte kaydeder; bırakma editörün dışına olduysa dragend kaydeder
+  let dragMove = false;
+  document.addEventListener('dragend', () => {
+    if (!dragMove) return;
+    dragMove = false;
+    app.commit('edit');
+  });
 
   app.exec = function (cmd, value = null) {
     app.clearSelection && app.clearSelection();
@@ -228,9 +236,29 @@
     if (next >= 1 && next <= 1638) app.setFontSize(String(next));
   };
 
+  // Word gibi: paragraf stili uygulanınca paragrafın tamamını kaplayan doğrudan yazı tipi, punto ve renk kalkar;
+  // paragraf stilin yazı tipini alır (ör. Ctrl+A ile TNR 12 yapılmış metnin ardından eklenen başlık Başlık 1 olur).
+  // Kalın/italik gibi vurgular ve paragraf biçimi (girinti, aralık, hizalama) kalır.
+  function dropWholeParagraphFont(block) {
+    const all = block.textContent.replace(/\s+/g, '');
+    const props = ['fontFamily', 'fontSize', 'color'];
+    props.forEach((p) => (block.style[p] = ''));
+    if (!block.getAttribute('style')) block.removeAttribute('style');
+    block.querySelectorAll('span, font').forEach((el) => {
+      if (el.closest('ul, ol') !== block.closest('ul, ol')) return; // alt listenin metni ayrı paragraftır
+      if (el.textContent.replace(/\s+/g, '') !== all) return;
+      props.forEach((p) => (el.style[p] = ''));
+      ['face', 'size', 'color'].forEach((a) => el.removeAttribute(a));
+      if (!el.getAttribute('style')) el.removeAttribute('style');
+      if (!el.attributes.length) el.replaceWith(...el.childNodes);
+    });
+  }
   app.setBlock = function (tag) {
     focusEditor();
     app.withoutBands(() => document.execCommand('formatBlock', false, tag));
+    const pins = app.pinSelection();
+    selectedBlocks().forEach(dropWholeParagraphFont);
+    app.unpinSelection(pins);
     afterFormat();
   };
 
@@ -497,6 +525,283 @@
     afterFormat();
   });
 
+  // ---------- Stiller (Word: Giriş > Stiller > Değiştir) ----------
+  // Normal ve Başlık 1–3'ün yazı tipi, punto, kalın/italik, renk, hizalama, önce/sonra aralığı ve satır aralığı.
+  // Değişiklik o stildeki bütün paragraflara CSS'ten uygulanır (core.js: applyStyles); paragraflara ayrıca verilmiş
+  // biçim korunur. Pencere dört stilin kopyasını düzenler; yalnızca değiştirilen alanlar yazılır.
+  const styleDlg = $('styleDialog');
+  const styleForm = styleDlg.querySelector('form').elements;
+  let styleWork = null;
+  let styleKey = 'p';
+  let styleShown = null;
+  const hexOf = (c) => {
+    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || '');
+    return m ? '#' + [m[1], m[2], m[3]].map((v) => (+v).toString(16).padStart(2, '0')).join('') : '#000000';
+  };
+  const styleFields = (s) => ({ font: s.font, size: trNum(s.size), color: s.color, bold: s.bold, italic: s.italic, align: s.align,
+    before: trNum(SS.round(s.before, 1)), after: trNum(SS.round(s.after, 1)), line: trNum(SS.round(s.line, 2)) });
+  function fillStyleForm(v) {
+    setSelectValue(styleForm.font, v.font);
+    for (const k of ['size', 'color', 'align', 'before', 'after', 'line']) styleForm[k].value = v[k];
+    styleForm.bold.checked = v.bold;
+    styleForm.italic.checked = v.italic;
+    stylePreview();
+  }
+  function showStyle(k) {
+    styleShown = styleFields(styleWork[k]);
+    fillStyleForm(styleShown);
+  }
+  function readStyle(k) {
+    const f = styleForm;
+    const s = styleWork[k];
+    const v = (name) => (String(f[name].value) !== String(styleShown[name]) ? numOf(f[name].value) : null);
+    if (f.font.value !== styleShown.font) s.font = f.font.value;
+    if (v('size') >= 1 && v('size') <= 1638) s.size = Math.round(v('size') * 2) / 2;
+    if (v('before') !== null) s.before = SS.clamp(v('before'), 0, 1584);
+    if (v('after') !== null) s.after = SS.clamp(v('after'), 0, 1584);
+    if (v('line') > 0) s.line = SS.clamp(v('line'), 0.06, 132);
+    s.color = f.color.value.toLowerCase();
+    s.bold = f.bold.checked;
+    s.italic = f.italic.checked;
+    s.align = f.align.value;
+  }
+  function stylePreview() {
+    const f = styleForm;
+    const pv = $('stylePreview');
+    pv.style.fontFamily = app.fontStack(f.font.value);
+    pv.style.fontSize = Math.min(36, numOf(f.size.value) || 11) + 'pt';
+    pv.style.fontWeight = f.bold.checked ? 'bold' : 'normal';
+    pv.style.fontStyle = f.italic.checked ? 'italic' : 'normal';
+    pv.style.color = f.color.value;
+    pv.style.textAlign = f.align.value;
+  }
+  app.styleDialog = function (k) {
+    focusEditor();
+    styleWork = JSON.parse(JSON.stringify(app.state.styles));
+    styleKey = app.STYLE_KEYS.includes(k) ? k : 'p';
+    styleForm.style.value = styleKey;
+    if (styleForm.font.options.length < INSTALLED.length)
+      for (const f of INSTALLED) {
+        const o = new Option(f, f);
+        o.style.fontFamily = `"${f}"`;
+        styleForm.font.add(o);
+      }
+    showStyle(styleKey);
+    styleDlg.returnValue = '';
+    styleDlg.showModal();
+  };
+  styleForm.style.addEventListener('change', () => {
+    readStyle(styleKey);
+    styleKey = styleForm.style.value;
+    showStyle(styleKey);
+  });
+  styleDlg.querySelector('form').addEventListener('input', stylePreview);
+  // Word'ün "Seçimle eşleşecek şekilde güncelle"si: imlecin paragrafının biçimi alanlara gelir
+  $('styleFromSel').addEventListener('click', () => {
+    const r = app.getCaretRange && app.getCaretRange();
+    const n = r && (r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement);
+    const b = n && ed.contains(n) && n.closest('p,h1,h2,h3,h4,h5,h6,li');
+    if (!b) return SS.toast('Önce metinde bir paragrafa tıklayın.');
+    const w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+    let t = w.nextNode();
+    while (t && !t.nodeValue.trim()) t = w.nextNode();
+    const cs = getComputedStyle(t ? t.parentElement : b);
+    const bcs = getComputedStyle(b);
+    // Satır aralığı yalnızca paragrafa ayrıca verilmişse alınır: birimsiz CSS satır yüksekliği yazı tipiyle
+    // çarpıldığından, stilin yazı tipi değişince hesaplanan kat kayar (Word'de kat yazı tipinden bağımsızdır)
+    const ls = b.style.lineHeight ? app.lineSpacing(b) : { px: true };
+    fillStyleForm({
+      font: app.lineFont(b),
+      size: trNum(Math.round(parseFloat(cs.fontSize) * 1.5) / 2),
+      color: hexOf(cs.color),
+      bold: parseInt(cs.fontWeight, 10) >= 600,
+      italic: cs.fontStyle === 'italic',
+      align: { center: 'center', right: 'right', end: 'right', justify: 'justify' }[bcs.textAlign] || 'left',
+      before: trNum(SS.round((parseFloat(bcs.marginTop) || 0) * 0.75, 1)),
+      after: trNum(SS.round((parseFloat(bcs.marginBottom) || 0) * 0.75, 1)),
+      line: ls.px ? styleForm.line.value : trNum(SS.round(ls.multiple, 2)),
+    });
+  });
+  $('styleDefault').addEventListener('click', () => styleDlg.close('default'));
+  styleDlg.addEventListener('close', () => {
+    const rv = styleDlg.returnValue;
+    const work = styleWork;
+    styleWork = null;
+    if (!work || (rv !== 'ok' && rv !== 'default')) return;
+    styleWork = work;
+    readStyle(styleKey);
+    styleWork = null;
+    const next = app.cleanStyles(work, app.state.styles);
+    if (rv === 'default')
+      SS.toast(app.saveDefaultStyles(next) ? 'Stiller bu belgeye uygulandı; yeni belgeler de bu stillerle açılacak.' : 'Varsayılan kaydedilemedi (tarayıcı depolaması kapalı).', 4000);
+    focusEditor();
+    app.setStyles(next);
+    updateToolbarState();
+  });
+
+  // ---------- Biçim boyacısı (Word: Giriş > Biçim Boyacısı, Ctrl+Shift+C / Ctrl+Shift+V) ----------
+  // Kopyalanan: seçimin başındaki karakter biçimi (yazı tipi, punto, kalın, italik, altı/üstü çizili, renk, vurgu,
+  // üst/alt simge). İmleç tek başınaysa, paragraf işareti ya da birden çok paragraf seçiliyse paragraf biçimi de
+  // (stil, hizalama, girinti, aralık, satır aralığı). Uygulama: karakter biçimi seçime (tıklanınca sözcüğe),
+  // paragraf biçimi seçili paragraflara; tek geri alma adımı. Düğme: tek tık bir kez, çift tık sürekli (Esc: bitir).
+  let fmt = null;
+  let painting = 0; // 0 kapalı, 1 bir kez, 2 sürekli
+  let batching = false; // true iken girdi olayları geçmişe yazılmaz (toplu biçim tek adım)
+  const PARA_PROPS = ['textAlign', 'marginLeft', 'marginRight', 'textIndent', 'marginTop', 'marginBottom', 'lineHeight'];
+  const fam1 = (f) => f.split(',')[0].replace(/["']/g, '').trim();
+  const ptOf = (cs) => Math.round(parseFloat(cs.fontSize) * 1.5) / 2;
+  function firstTextIn(r) {
+    if (r.startContainer.nodeType === 3) return r.startContainer;
+    const root = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentNode;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let t = w.nextNode(); t; t = w.nextNode()) if (r.intersectsNode(t) && t.nodeValue.trim()) return t;
+    return null;
+  }
+  function readFormat() {
+    const sel = window.getSelection();
+    const r = sel.rangeCount && ed.contains(sel.getRangeAt(0).startContainer) ? sel.getRangeAt(0) : savedRange;
+    if (!r || !ed.contains(r.startContainer)) return null;
+    const t = firstTextIn(r);
+    const el = t ? t.parentElement : r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+    const block = el.closest(BLOCK_SEL);
+    const cs = getComputedStyle(el);
+    const c = { font: fam1(cs.fontFamily), size: ptOf(cs), bold: parseInt(cs.fontWeight, 10) >= 600, italic: cs.fontStyle === 'italic',
+      underline: false, strike: false, color: hexOf(cs.color), bg: null, va: null };
+    for (let x = el; x && x !== ed; x = x.parentElement) {
+      const s = getComputedStyle(x);
+      const d = s.textDecorationLine || '';
+      if (d.includes('underline') && x.tagName !== 'A') c.underline = true;
+      if (d.includes('line-through')) c.strike = true;
+      if (!c.bg && x !== block && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(s.backgroundColor)) c.bg = hexOf(s.backgroundColor);
+      if (!c.va && /^(SUP|SUB)$/.test(x.tagName)) {
+        c.va = x.tagName === 'SUP' ? 'superscript' : 'subscript';
+        c.size = ptOf(getComputedStyle(x.parentElement)); // simge küçültülmüş çizilir: asıl punto
+      }
+      if (x === block) break;
+    }
+    const withPara = sel.isCollapsed || !!paragraphMarkSelection() || selectedBlocks().length > 1;
+    const p = withPara && block && ed.contains(block)
+      ? { tag: block.tagName, style: Object.fromEntries(PARA_PROPS.map((k) => [k, block.style[k]])) }
+      : null;
+    return { c, p };
+  }
+  // Tıklanan sözcük (Word'de biçim boyacısıyla tıklamak sözcüğe uygular)
+  function selectWordAtCaret(sel) {
+    const r = sel.getRangeAt(0);
+    const n = r.startContainer;
+    if (n.nodeType !== 3) return;
+    const s = n.nodeValue;
+    const W = /[\p{L}\p{N}_'’-]/u;
+    let a = r.startOffset;
+    let b = r.startOffset;
+    while (a > 0 && W.test(s[a - 1])) a--;
+    while (b < s.length && W.test(s[b])) b++;
+    if (a === b) return;
+    const rr = document.createRange();
+    rr.setStart(n, a);
+    rr.setEnd(n, b);
+    sel.removeAllRanges();
+    sel.addRange(rr);
+  }
+  function applyFormat() {
+    if (!fmt) return;
+    app.clearSelection && app.clearSelection();
+    focusEditor();
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    if (sel.isCollapsed) selectWordAtCaret(sel);
+    const { c, p } = fmt;
+    batching = true; // birçok komut, tek geri alma adımı
+    try {
+      app.withoutBands(() => {
+        // Önce paragrafın stili: karakter biçiminden yalnızca yeni stilden farklı olan doğrudan biçim olarak kalır.
+        // Paragraf biçimi (hizalama, girinti, aralık) en sonda: Chrome'un removeFormat'ı hizalamayı da siliyor.
+        const blocks = () => selectedBlocks().filter((x) => !x.classList.contains('pb'));
+        if (p) {
+          const pins = app.pinSelection();
+          for (const b of blocks()) {
+            if (b.tagName === p.tag || b.tagName === 'LI' || !/^(P|H[1-3])$/.test(p.tag) || !/^(P|H[1-6]|DIV)$/.test(b.tagName)) continue;
+            const n = document.createElement(p.tag);
+            if (b.getAttribute('style')) n.setAttribute('style', b.getAttribute('style'));
+            while (b.firstChild) n.appendChild(b.firstChild);
+            b.replaceWith(n);
+          }
+          app.unpinSelection(pins);
+        }
+        const paraProps = () => {
+          if (!p) return;
+          for (const b of blocks()) {
+            for (const k of PARA_PROPS) if (b.tagName !== 'LI' || !/^(margin|textIndent)/.test(k)) b.style[k] = p.style[k] || '';
+            if (!b.getAttribute('style')) b.removeAttribute('style');
+          }
+        };
+        if (sel.isCollapsed) return paraProps();
+        const now = () => {
+          const t = firstTextIn(sel.getRangeAt(0));
+          return getComputedStyle(t ? t.parentElement : ed);
+        };
+        const exec = (cmd, v = null, css = true) => {
+          document.execCommand('styleWithCSS', false, css);
+          document.execCommand(cmd, false, v);
+          document.execCommand('styleWithCSS', false, true);
+        };
+        const isOn = (cmd) => {
+          try {
+            return document.queryCommandState(cmd);
+          } catch (_) {
+            return false;
+          }
+        };
+        exec('removeFormat');
+        if (fam1(now().fontFamily).toLowerCase() !== c.font.toLowerCase()) exec('fontName', c.font);
+        if (Math.abs(ptOf(now()) - c.size) > 0.01) {
+          pendingSize = c.size; // fixFontTags gerçek puntoyu yazar
+          exec('fontSize', '7', false);
+        }
+        for (const [cmd, want] of [['bold', c.bold], ['italic', c.italic], ['underline', c.underline], ['strikeThrough', c.strike]])
+          if (isOn(cmd) !== want) exec(cmd);
+        if (hexOf(now().color) !== c.color) exec('foreColor', c.color);
+        if (c.bg) exec('hiliteColor', c.bg);
+        if (c.va) exec(c.va, null, false);
+        paraProps();
+      });
+    } finally {
+      batching = false;
+    }
+    afterFormat();
+  }
+  const painterBtn = document.querySelector('#toolbar [data-cmd="formatPainter"]');
+  function setPainting(mode) {
+    painting = mode;
+    ed.classList.toggle('painting', !!mode);
+    painterBtn.classList.toggle('active', !!mode);
+    $('stHint').textContent = mode ? 'Biçim boyacısı: biçimin uygulanacağı metni seçin ya da sözcüğe tıklayın' + (mode === 2 ? ' (sürekli; Esc: bitir)' : ' (Esc: vazgeç)') : '';
+  }
+  // Düğme: tek tık bir kez, ikinci tık kapatır; çift tık sürekli kip
+  app.formatPainter = function (sticky) {
+    if (painting && !sticky) return setPainting(0);
+    fmt = readFormat();
+    if (!fmt) return SS.toast('Önce biçimi alınacak metne tıklayın.');
+    setPainting(sticky ? 2 : 1);
+  };
+  painterBtn.addEventListener('dblclick', () => app.formatPainter(true));
+  ed.addEventListener('mouseup', () => {
+    if (!painting) return;
+    setTimeout(() => {
+      applyFormat();
+      if (painting === 1) setPainting(0);
+    }, 0);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (painting && e.key === 'Escape') setPainting(0);
+  });
+  app.copyFormat = function () {
+    fmt = readFormat();
+    if (fmt) SS.toast('Biçim kopyalandı. Uygulamak için metni seçip Ctrl+Shift+V.', 2500);
+  };
+  app.hasFormat = () => !!fmt;
+  app.pasteFormat = () => applyFormat();
+
   // Word'ün "Satır ve paragraf aralığı" menüsündeki hızlı seçenekler
   function toggleParaSpace(which) {
     focusEditor();
@@ -551,7 +856,15 @@
     app.setFontSize(String(v));
   });
   syncCombos();
-  blockSel.addEventListener('change', () => app.setBlock(blockSel.value));
+  blockSel.addEventListener('change', () => {
+    if (blockSel.value !== 'edit') return app.setBlock(blockSel.value);
+    // Pencere imlecin paragrafının stiliyle açılır; kutu yeniden o stili gösterir
+    const r = savedRange;
+    const n = r && (r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement);
+    const h = n && ed.contains(n) && n.closest('h1,h2,h3');
+    blockSel.value = h ? h.tagName.toLowerCase() : 'p';
+    app.styleDialog(blockSel.value);
+  });
   lineHeightSel.addEventListener('change', () => {
     const v = lineHeightSel.value;
     if (v === 'dialog') app.paragraphDialog();
@@ -617,9 +930,59 @@
     app.scheduleLayout();
     const t = e.inputType || '';
     const kind = /^insert(Text|CompositionText|ReplacementText)$/.test(t) ? 'typing' : /^delete/.test(t) ? 'deleting' : 'edit';
-    app.commit(kind);
+    if (!batching && !dragMove) app.commit(kind);
     if (/^format/.test(t)) updateToolbarState(); // Ctrl+B/I/U sonrası düğme durumları
+    if (!batching && (t === 'insertText' || t === 'insertParagraph') && autoLink(e)) app.commit('edit'); // ayrı adım: Ctrl+Z köprüyü geri alır
   });
+
+  // Yazarken otomatik köprü (Word: "Yazarken Otomatik Biçimlendir > İnternet ve ağ yollarını köprülerle"): boşluk,
+  // sekme ya da Enter'dan sonra önceki sözcük web ya da e-posta adresiyse köprü olur. Sondaki noktalama köprüye
+  // girmez. Hemen ardından Ctrl+Z yalnızca köprüyü geri alır, yazılan kalır.
+  const AUTO_URL = /^(?:(?:https?:\/\/|www\.)[^\s<>"]+\.[^\s<>"]+|mailto:[^\s@<>"]+@[^\s@<>"]+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+)$/i;
+  function autoLink(e) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed) return false;
+    let node = null;
+    let end = 0;
+    if (e.inputType === 'insertText') {
+      if (!/^[ \t\u00a0]$/.test(e.data || '')) return false;
+      const r = sel.getRangeAt(0);
+      node = r.startContainer;
+      end = r.startOffset - 1; // yazılan boşluğun yeri
+      if (node.nodeType !== 3 || end < 1) return false;
+    } else {
+      // Enter: önceki paragrafın son metni
+      const cur = unitOf(sel.anchorNode);
+      const units = [...ed.querySelectorAll(UNIT_SEL)];
+      const prev = cur && units[units.indexOf(cur) - 1];
+      if (!prev) return false;
+      const w = document.createTreeWalker(prev, NodeFilter.SHOW_TEXT);
+      for (let t = w.nextNode(); t; t = w.nextNode()) if (t.nodeValue.length) node = t;
+      if (!node) return false;
+      end = node.nodeValue.length;
+    }
+    const m = /(\S+)$/.exec(node.nodeValue.slice(0, end));
+    if (!m || node.parentElement.closest('a')) return false;
+    const trail = (/[.,;:!?)\]}"'»]+$/.exec(m[1]) || [''])[0];
+    const word = m[1].slice(0, m[1].length - trail.length);
+    if (!AUTO_URL.test(word)) return false;
+    const href = normalizeUrl(word);
+    if (!href) return false;
+    const r = document.createRange();
+    const start = end - m[1].length;
+    r.setStart(node, start);
+    r.setEnd(node, start + word.length);
+    const a = document.createElement('a');
+    a.setAttribute('href', href);
+    r.surroundContents(a);
+    if (e.inputType === 'insertText' && a.nextSibling && a.nextSibling.nodeType === 3) {
+      const c = document.createRange(); // imleç yazılan boşluğun ardında kalır
+      c.setStart(a.nextSibling, Math.min(a.nextSibling.length, trail.length + 1));
+      sel.removeAllRanges();
+      sel.addRange(c);
+    }
+    return true;
+  }
 
   // ---------- Paragrafın tamamını silme / üzerine yazma (Word gibi) ----------
   // Üç tıklama ya da Shift+↓ seçimi sonraki paragrafın başında (ofset 0) biter: Word'de paragraf işareti de
@@ -640,33 +1003,52 @@
     const f = r.cloneContents();
     return !f.textContent.length && !f.querySelector('br');
   };
-  // Seçimin sonu başında durduğu (içinden hiçbir şey seçilmemiş) paragraf
+  const isPB = (n) => !!n && n.nodeType === 1 && n.classList.contains('pb');
+  // Seçimin sonu başında durduğu (içinden hiçbir şey seçilmemiş) paragraf ya da sayfa sonu
   function blockAtRangeEnd(r) {
     const n = r.endContainer;
     if (n.nodeType === 1 && !unitOf(n)) {
-      // editör ya da liste düzeyinde, iki blok arası: sonraki blok
+      // editör ya da liste düzeyinde, iki blok arası: sonraki blok (üç tıklama sayfa sonunun önünde biter)
       let c = n.childNodes[r.endOffset];
-      while (c && c.nodeType === 1 && !c.matches(UNIT_SEL)) c = c.firstElementChild;
+      while (c && c.nodeType === 1 && !c.matches(UNIT_SEL) && !isPB(c)) c = c.firstElementChild;
       return c && c.nodeType === 1 ? c : null;
     }
     const u = unitOf(n);
     return u && atStartOf(u, n, r.endOffset) ? u : null;
   }
-  // Seçim sonraki paragrafın başında bitiyorsa: { A: ilk paragraf, B: sonraki paragraf, whole: A'nın başından mı }
+  // B'nin hemen önündeki sayfa sonlarının ilki (B listenin ilk maddesiyse listenin önündekiler)
+  function pageBreaksBefore(B) {
+    let top = B;
+    while (top.parentElement && top.parentElement !== ed && !top.previousElementSibling) top = top.parentElement;
+    let p = top.parentElement === ed ? top.previousElementSibling : null;
+    let first = null;
+    for (; isPB(p); p = p.previousElementSibling) first = p;
+    return first;
+  }
+  // Seçim sonraki paragrafın başında bitiyorsa: { A: ilk paragraf, B: sonraki paragraf ya da sayfa sonu, whole: A'nın başından mı }
+  // Word'de Ctrl+Enter'ın sayfa sonu ayrı bir öğedir: seçim hemen ardındaki paragrafın başında bitse de (imleç sayfa
+  // sonuna konamadığı için Shift+↓ onu atlar) sayfa sonu seçime sayılmaz, B o olur.
   function paragraphMarkSelection() {
     const sel = window.getSelection();
     if (!sel.rangeCount || sel.isCollapsed) return null;
     const r = sel.getRangeAt(0);
     if (!ed.contains(r.commonAncestorContainer) && r.commonAncestorContainer !== ed) return null;
-    const B = blockAtRangeEnd(r);
+    let B = blockAtRangeEnd(r);
     const A = unitOf(r.startContainer);
     if (!A || !B || A === B || A.contains(B) || !(A.compareDocumentPosition(B) & Node.DOCUMENT_POSITION_FOLLOWING)) return null;
+    const pb = !isPB(B) && pageBreaksBefore(B);
+    if (pb && A.compareDocumentPosition(pb) & Node.DOCUMENT_POSITION_FOLLOWING) B = pb;
     return { r, A, B, whole: atStartOf(A, r.startContainer, r.startOffset) };
+  }
+  // B'den önceki son paragraf (B bir alt listenin ilk maddesiyse üst madde)
+  function unitBefore(B) {
+    const units = [...ed.querySelectorAll(UNIT_SEL)];
+    if (!isPB(B)) return units[units.indexOf(B) - 1];
+    return units.filter((u) => u.compareDocumentPosition(B) & Node.DOCUMENT_POSITION_FOLLOWING).pop();
   }
   // Seçimin sonunu B'den önceki paragrafın sonuna çek (B ayrı kalır)
   function trimToParagraphEnd(m) {
-    const units = [...ed.querySelectorAll(UNIT_SEL)];
-    const prev = units[units.indexOf(m.B) - 1];
+    const prev = unitBefore(m.B);
     if (!prev) return;
     const end = document.createRange();
     end.selectNodeContents(prev);
@@ -691,9 +1073,17 @@
     rr.setEndBefore(m.B);
     app.withoutBands(() => rr.deleteContents());
     ed.querySelectorAll('ul, ol').forEach((l) => !l.querySelector('li') && l.remove());
+    // İmleç B'nin başına; B sayfa sonuysa (imleç konamaz) önceki paragrafın sonuna
     const c = document.createRange();
-    c.setStart(m.B, 0);
-    c.collapse(true);
+    const prev = isPB(m.B) && unitBefore(m.B);
+    if (prev) {
+      c.selectNodeContents(prev);
+      const sub = prev.querySelector(':scope > ul, :scope > ol');
+      if (sub) c.setEndBefore(sub);
+      c.collapse(false);
+    } else if (isPB(m.B) && m.B.nextElementSibling) c.setStart(m.B.nextElementSibling, 0);
+    else c.setStart(m.B, 0);
+    c.collapse(false);
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(c);
@@ -701,6 +1091,24 @@
     return true;
   }
   app.deleteSelection = () => deleteParagraphs() || app.withoutBands(() => document.execCommand('delete'));
+  // Tam paragraf seçiliyken Enter (Word gibi): seçimin yerinde tek boş paragraf kalır, imleç orada
+  function enterOverParagraphs() {
+    const m = paragraphMarkSelection();
+    if (!m || !m.whole || m.A.tagName === 'LI') return false;
+    const rr = document.createRange();
+    rr.setStartAfter(m.A);
+    rr.setEndBefore(m.B);
+    app.withoutBands(() => rr.deleteContents());
+    ed.querySelectorAll('ul, ol').forEach((l) => !l.querySelector('li') && l.remove());
+    m.A.innerHTML = '<br>';
+    const c = document.createRange();
+    c.setStart(m.A, 0);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(c);
+    afterFormat();
+    return true;
+  }
   app.trimParagraphMark = () => {
     const m = paragraphMarkSelection();
     if (m) trimToParagraphEnd(m);
@@ -713,7 +1121,9 @@
       e.inputType === 'historyUndo' ? app.undo() : app.redo();
       return;
     }
-    if (/^delete/.test(e.inputType) && deleteParagraphs()) {
+    if (e.inputType === 'deleteByDrag') dragMove = true;
+    else if (e.inputType === 'insertFromDrop') dragMove = false;
+    if ((/^delete/.test(e.inputType) && deleteParagraphs()) || (e.inputType === 'insertParagraph' && enterOverParagraphs())) {
       e.preventDefault();
       return;
     }
@@ -744,12 +1154,15 @@
     const known = new Set(ed.querySelectorAll('.pb'));
     app.withoutBands(() => document.execCommand('insertHTML', false, '<div class="pb" contenteditable="false"></div>'));
     const pb = [...ed.querySelectorAll('.pb')].find((p) => !known.has(p));
+    app.normalizeBlocks(); // liste maddesinde: sayfa sonu listenin dışına çıkar, liste bölünür
     const sel = window.getSelection();
     if (pb && !pb.nextElementSibling) pb.after(Object.assign(document.createElement('p'), { innerHTML: '<br>' }));
-    // İmleci sayfa sonundan sonraki paragrafın başına taşı
-    if (pb && pb.nextElementSibling) {
+    // İmleci sayfa sonundan sonraki paragrafın (liste ise ilk maddenin) başına taşı
+    let next = pb && pb.nextElementSibling;
+    while (next && !next.matches(UNIT_SEL) && next.firstElementChild) next = next.firstElementChild;
+    if (next) {
       const r = document.createRange();
-      r.setStart(pb.nextElementSibling, 0);
+      r.setStart(next, 0);
       r.collapse(true);
       sel.removeAllRanges();
       sel.addRange(r);
@@ -1163,7 +1576,12 @@
     const r = sel.getRangeAt(0).cloneRange();
     if (!ed.contains(r.startContainer) || !ed.contains(r.endContainer)) return null;
     const m = paragraphMarkSelection();
-    if (m) r.setEndBefore(m.B);
+    if (m) {
+      // B bir listenin ilk maddesiyse seçim listenin önünde biter: panoya boş liste kabuğu gitmesin
+      let e = m.B;
+      while (e.parentElement && e.parentElement !== ed && !e.previousSibling) e = e.parentElement;
+      r.setEndBefore(e);
+    }
     const box = document.createElement('div');
     box.appendChild(r.cloneContents());
     box.querySelectorAll('.el').forEach((e) => e.classList.remove('el'));
@@ -1226,7 +1644,9 @@
     const lists = nodes.every((n) => /^(UL|OL)$/.test(n.tagName));
     if (!C || !nodes.length) return false;
     const inList = C.tagName === 'LI';
-    if (inList && !(lists && nodes.length === 1 && nodes[0].tagName === C.parentElement.tagName)) return false;
+    const li = C.closest('li');
+    if (li && ed.contains(li) && !(inList && lists && nodes.length === 1 && nodes[0].tagName === C.parentElement.tagName))
+      return insertParagraphsInList(li, r, nodes);
     const blocks = inList ? [...nodes[0].children] : nodes; // listeye liste maddeleri girer
     let ref;
     const after = document.createRange();
@@ -1259,6 +1679,46 @@
     return true;
   }
 
+  // Liste maddesine liste olmayan tam paragraflar: paragraflar listenin dışında, kendi biçimleriyle girer; liste
+  // imlecin yerinden bölünür (maddenin başı: önüne, metninin sonu: ardına, ortası: madde ikiye), kalan maddeler
+  // yeni listede numarası sürerek devam eder. Chrome'un insertHTML'i paragrafı maddenin içine koyuyordu.
+  function insertParagraphsInList(li, r, nodes) {
+    let pos = { node: r.startContainer, off: r.startOffset };
+    if (atStartOf(li, r.startContainer, r.startOffset)) pos = { node: li.parentNode, off: Array.prototype.indexOf.call(li.parentNode.childNodes, li) };
+    else {
+      const tail = document.createRange(); // maddenin kendi metninin sonu mu (alt listesi hariç)
+      tail.setStart(r.startContainer, r.startOffset);
+      tail.setEnd(li, li.childNodes.length);
+      const sub = li.querySelector(':scope > ul, :scope > ol');
+      if (sub) tail.setEndBefore(sub);
+      const f = tail.cloneContents();
+      if (!f.textContent.length && !f.querySelector('br') && !sub) pos = { node: li.parentNode, off: Array.prototype.indexOf.call(li.parentNode.childNodes, li) + 1 };
+    }
+    let last = null;
+    let next = null;
+    app.withoutBands(() => {
+      const cut = app.splitTop(pos.node, pos.off);
+      const ref = cut.top.nextSibling;
+      nodes.forEach((n) => (last = ed.insertBefore(n, ref)));
+      if (cut.rest) next = ed.insertBefore(cut.rest, ref);
+      cut.dropEmptyTop();
+    });
+    // Word: imleç yapıştırılanın ardında (kalan ilk maddenin başı ya da son paragrafın sonu)
+    const c = document.createRange();
+    let first = next;
+    while (first && !first.matches(UNIT_SEL) && first.firstElementChild) first = first.firstElementChild;
+    if (first) c.setStart(first, 0);
+    else {
+      c.selectNodeContents(last);
+      c.collapse(false);
+    }
+    c.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(c);
+    return true;
+  }
+
   // Satır içi içerik doğrudan imlecin yerine konur (Chrome'un insertHTML'i stil span'larını ayıklıyor)
   function insertInline(box) {
     const sel = window.getSelection();
@@ -1279,6 +1739,7 @@
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const root = doc.querySelector(`[${CLIP_ATTR}]`);
     const box = cleanInternal(root, document.createElement('div'));
+    box.querySelectorAll('ul, ol').forEach((l) => !l.querySelector('li') && l.remove()); // eski panolardaki boş kabuk
     const sel = window.getSelection();
     if (sel.rangeCount && !sel.isCollapsed) app.deleteSelection(); // seçimin yerine
     if (!box.querySelector('p,h1,h2,h3,ul,ol,li,.pb')) insertInline(box);

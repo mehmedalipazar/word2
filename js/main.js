@@ -40,6 +40,7 @@
     find: () => app.openFind(true),
     paragraph: () => app.paragraphDialog(),
     link: () => app.linkDialog(),
+    formatPainter: () => app.formatPainter(),
     zoomIn: () => zoomStep(1),
     zoomOut: () => zoomStep(-1),
     zoomReset: () => setZoom(1),
@@ -135,6 +136,16 @@
       e.preventDefault();
       if (k === '0') setZoom(1);
       else zoomStep(e.code === 'NumpadAdd' ? 1 : -1);
+    } else if (e.shiftKey && (k === 'c' || k === 'v') && !inField && !app.objectsFocused()) {
+      // Word: Ctrl+Shift+C / Ctrl+Shift+V biçimi kopyala / uygula. Biçim kopyalanmadıysa Ctrl+Shift+V tarayıcının
+      // düz metin yapıştırması olarak kalır
+      if (k === 'c') {
+        e.preventDefault();
+        app.copyFormat();
+      } else if (app.hasFormat()) {
+        e.preventDefault();
+        app.pasteFormat();
+      }
     } else if ((e.shiftKey ? SHIFT_KEYS : TEXT_KEYS)[k]) {
       e.preventDefault();
       if (inField) return;
@@ -660,6 +671,8 @@
   async function init() {
     syncTitle();
     updatePageStyle();
+    state.styles = app.defaultStyles(); // ilk boş belge de "Varsayılan olarak ayarla" ile saklanan stillerle
+    app.applyStyles();
     app.relayoutAll();
     app.resetHistory();
     updateUndo();

@@ -23,11 +23,21 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 - Metin: yazı tipi, boyut, kalın/italik/altı çizili/üstü çizili, üst/alt simge, renk, vurgu, hizalama, başlıklar.
   Yazı tipi ve boyut kutularına Word'deki gibi yazılabilir (ör. 11,5 nk); yazı tipi listesi bilgisayarda yüklü
   yaygın yazı tiplerini (Garamond, Book Antiqua, Arial Narrow… yüklüyse) kendi görünümleriyle gösterir.
+- **Stiller** (stil kutusunda "Stili değiştir…"): Normal ve Başlık 1–3'ün yazı tipi, punto, kalın/italik, renk,
+  hizalama, önce/sonra aralığı ve satır aralığı; o stildeki bütün paragraflar güncellenir. Normal, belgenin varsayılan
+  yazı tipidir. "Seçimden al" imlecin paragrafının biçimini stile alır; "Varsayılan olarak ayarla" stilleri yeni
+  belgeler için de saklar. Word'deki gibi stil uygulamak, paragrafın tamamına verilmiş yazı tipi/punto/rengi kaldırır.
+  Stiller Word'e styles.xml olarak gider, Word belgesinin Normal ve Başlık 1–3 stilleri de açılışta alınır.
+- **Biçim boyacısı** (fırça düğmesi; Ctrl+Shift+C / Ctrl+Shift+V): karakter biçimini (ve imleç tek başınaysa paragraf
+  biçimini) başka metne uygular; tek tık bir kez, çift tık sürekli (Esc: bitir); tıklanan sözcüğe de uygulanır.
 - **Köprü (bağlantı)**: Ctrl+K ya da köprü düğmesi (ekle, düzenle, kaldır; `www.…` ve e-posta adresi de olur);
-  Ctrl+tık bağlantıyı açar. Web'den/Word'den yapıştırılan köprüler korunur; Word'e köprü olarak aktarılır, Word'deki
+  Ctrl+tık bağlantıyı açar. Yazılan web/e-posta adresi boşluk ya da Enter'dan sonra kendiliğinden köprü olur (hemen
+  Ctrl+Z geri alır). Web'den/Word'den yapıştırılan köprüler korunur; Word'e köprü olarak aktarılır, Word'deki
   köprüler de köprü olarak gelir.
-- Word gibi paragraf işareti: üç tıkla seçip silmek paragrafı bütünüyle siler, sonraki paragrafın stili korunur.
-  Belge içinde kopyalanan paragraflar stilleriyle, sözcükler yazı tipi ve boyutuyla yapıştırılır.
+- Word gibi paragraf işareti: üç tıkla seçip silmek paragrafı bütünüyle siler, sonraki paragrafın stili ve ardındaki
+  sayfa sonu korunur. Belge içinde kopyalanan paragraflar stilleriyle, sözcükler yazı tipi ve boyutuyla yapıştırılır;
+  liste maddesine yapıştırılan paragraf listeyi bölerek ayrı paragraf olarak girer. Sürükle-bırakla taşıma tek geri
+  alma adımıdır.
 - **Satır aralığı Word'deki gibi satır cinsinden** (1,0 / 1,08 / 1,15 / 1,5 / 2,0…; "1,5" Word'ün 1,5 satırıdır);
   varsayılan Word'ün Normal stili gibi 1,08 satır + 8 nk paragraf sonrası
 - **Paragraf penceresi** (¶ düğmesi): sol/sağ girinti, ilk satır ya da asılı girinti, önce/sonra aralığı, satır aralığı
@@ -55,7 +65,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 - Hizala/dağıt, öne/arkaya, kilitle, çoğalt, cm cinsinden X/Y/Genişlik/Yükseklik/Açı
 - **Şekil yazısı** ("Şekil 1. …"): resme bağlıdır, resimle birlikte taşınır; numaralar belge sırasına göre
   kendiliğinden güncellenir (Şekil, Harita, Fotoğraf, Grafik… her etiket ayrı sayılır); resmin altında ya da üstünde
-- **Sayfa sonu** (Ctrl+Enter): sonraki metin yeni sayfadan başlar
+- **Sayfa sonu** (Ctrl+Enter): sonraki metin yeni sayfadan başlar; liste maddesinde listeyi böler (numara sürer)
 - Tek geri alma geçmişi (metin + resim işlemleri birlikte)
 - Kaydet/Aç (`.sayfa` dosyası), tarayıcıda otomatik kayıt: her sekmenin kendi kurtarma kaydı var, sayfa kapanırken
   son yazılanlar da korunur; kaydedilmemiş değişiklik varken kapatma/yenilemede tarayıcı uyarır. Kapanan sekmenin
@@ -84,6 +94,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 | Ctrl+] / Ctrl+[ | Yazıyı 1 nk büyüt / küçült |
 | Ctrl+= / Ctrl+Shift+= | Alt simge / üst simge |
 | Ctrl+Boşluk | Karakter biçimini temizle |
+| Ctrl+Shift+C / Ctrl+Shift+V | Biçimi kopyala / uygula (biçim kopyalanmadıysa Ctrl+Shift+V düz metin yapıştırır) |
 | Ctrl+Alt+1 / 2 / 3 | Başlık 1 / 2 / 3 |
 | Ctrl+1 / Ctrl+5 / Ctrl+2 | Satır aralığı tek / 1,5 / çift |
 | Ctrl+M / Ctrl+Shift+M | Girintiyi artır / azalt |
@@ -125,6 +136,7 @@ metin akışının içine konan görünmez `float` şeritleriyle kapatılır (`j
 - Köprüler yalnızca web (`http`, `https`) ve e-posta (`mailto`) adresleri içindir; belge içi (yer imi) köprüler yok,
   Word'den gelenlerin yalnızca metni alınır.
 - Stil listesi Normal ve Başlık 1–3'tür; Word'ün "Konu Başlığı" gibi diğer stilleri biçimleriyle Normal paragraf olur.
+  Stilde girinti ve "En az/Tam" satır aralığı yoktur (bunlar paragraf biçimi olarak kalır).
 - Kırpmada oran seçenekleri (1:1, 4:3…), sayıyla kırpma ve dışa doğru kırpma yok.
 - Şekil numaraları düz sayıdır (1, 2, 3…); Word'deki "Şekil 2.3" gibi bölüm numaralı yazılar düz numaraya döner.
 - Word/LibreOffice satırları tarayıcıdan biraz farklı kırabilir; uzun belgelerde sayfa sonları birkaç satır kayabilir (resimler yerinde kalır).
