@@ -1,0 +1,6 @@
+# Claude Code'un oturum dosyaları (zamanlayıcı kilidi vb.)
+.claude/
+
+# Geçici test çıktıları (bkz. CLAUDE.md)
+.test/
+.playwright-mcp/
